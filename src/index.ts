@@ -17,6 +17,8 @@ import { registerMetaRefreshHandler } from './adapters/meta/auth.js';
 import { MetaAdapter } from './adapters/meta/client.js';
 import { registerGoogleRefreshHandler } from './adapters/google/auth.js';
 import { GoogleAdapter } from './adapters/google/client.js';
+import { registerTikTokRefreshHandler } from './adapters/tiktok/auth.js';
+import { TikTokAdapter } from './adapters/tiktok/client.js';
 import { RateLimiter } from './utils/rate-limiter.js';
 import { AuditLog } from './utils/audit-log.js';
 import { DeleteGuard } from './safety/delete-guard.js';
@@ -68,6 +70,7 @@ async function main(): Promise<void> {
   const tokenManager = new TokenManager(getKeychainProvider());
   registerMetaRefreshHandler(tokenManager);
   registerGoogleRefreshHandler(tokenManager);
+  registerTikTokRefreshHandler(tokenManager);
 
   // ── Adapters ─────────────────────────────────────────────────────────────
   const adapters = new Map<string, BaseAdapter>();
@@ -87,6 +90,13 @@ async function main(): Promise<void> {
       // with credentials from keychain when actually called
       return {}; // Placeholder — actual client init happens in adapter
     }));
+  }
+
+  const tiktokConfig = config.platforms?.['tiktok'];
+  if (tiktokConfig && tiktokConfig.accounts && Object.keys(tiktokConfig.accounts).length > 0) {
+    adapters.set('tiktok', new TikTokAdapter((account) =>
+      tokenManager.getToken('tiktok', account),
+    ));
   }
 
   // ── Infrastructure ────────────────────────────────────────────────────────
