@@ -15,6 +15,8 @@ import { initKeychain, setKeychainProvider } from './auth/keychain.js';
 import { TokenManager } from './auth/token-manager.js';
 import { registerMetaRefreshHandler } from './adapters/meta/auth.js';
 import { MetaAdapter } from './adapters/meta/client.js';
+import { registerGoogleRefreshHandler } from './adapters/google/auth.js';
+import { GoogleAdapter } from './adapters/google/client.js';
 import { RateLimiter } from './utils/rate-limiter.js';
 import { AuditLog } from './utils/audit-log.js';
 import { DeleteGuard } from './safety/delete-guard.js';
@@ -65,6 +67,7 @@ async function main(): Promise<void> {
   const { getKeychainProvider } = await import('./auth/keychain.js');
   const tokenManager = new TokenManager(getKeychainProvider());
   registerMetaRefreshHandler(tokenManager);
+  registerGoogleRefreshHandler(tokenManager);
 
   // ── Adapters ─────────────────────────────────────────────────────────────
   const adapters = new Map<string, BaseAdapter>();
@@ -75,6 +78,15 @@ async function main(): Promise<void> {
       tokenManager.getToken('meta', account),
     );
     adapters.set('meta', metaAdapter);
+  }
+
+  const googleConfig = config.platforms?.['google'];
+  if (googleConfig && googleConfig.accounts && Object.keys(googleConfig.accounts).length > 0) {
+    adapters.set('google', new GoogleAdapter(async (_account) => {
+      // Client creation deferred to runtime — google-ads-node will be configured
+      // with credentials from keychain when actually called
+      return {}; // Placeholder — actual client init happens in adapter
+    }));
   }
 
   // ── Infrastructure ────────────────────────────────────────────────────────
