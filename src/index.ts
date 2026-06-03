@@ -22,6 +22,17 @@ import { DeleteGuard } from './safety/delete-guard.js';
 import type { BaseAdapter } from './adapters/base.js';
 import type { ToolContext } from './tools/register.js';
 import { campaignTools, CAMPAIGN_TOOL_DEFINITIONS } from './tools/campaigns.js';
+import { adsetTools, ADSET_TOOL_DEFINITIONS } from './tools/adsets.js';
+import { adTools, AD_TOOL_DEFINITIONS } from './tools/ads.js';
+import { creativeTools, CREATIVE_TOOL_DEFINITIONS } from './tools/creatives.js';
+import { audienceTools, AUDIENCE_TOOL_DEFINITIONS } from './tools/audiences.js';
+import { reportingTools, REPORTING_TOOL_DEFINITIONS } from './tools/reporting.js';
+import { budgetTools, BUDGET_TOOL_DEFINITIONS } from './tools/budgets.js';
+import { ruleTools, RULE_TOOL_DEFINITIONS } from './tools/rules.js';
+import { trackingTools, TRACKING_TOOL_DEFINITIONS } from './tools/tracking.js';
+import { keywordTools, KEYWORD_TOOL_DEFINITIONS } from './tools/keywords.js';
+import { accountTools, ACCOUNT_TOOL_DEFINITIONS } from './tools/accounts.js';
+import { systemTools, SYSTEM_TOOL_DEFINITIONS } from './tools/system.js';
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -82,19 +93,35 @@ async function main(): Promise<void> {
   };
 
   // ── Tool handlers ─────────────────────────────────────────────────────────
-  const campaigns = campaignTools(ctx);
-
   const allToolHandlers: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
-    list_campaigns: campaigns.list_campaigns,
-    get_campaign: campaigns.get_campaign,
-    create_campaign: campaigns.create_campaign,
-    update_campaign: campaigns.update_campaign,
-    set_campaign_status: campaigns.set_campaign_status,
-    delete_campaign: campaigns.delete_campaign,
-    clone_campaign: campaigns.clone_campaign,
+    ...campaignTools(ctx),
+    ...adsetTools(ctx),
+    ...adTools(ctx),
+    ...creativeTools(ctx),
+    ...audienceTools(ctx),
+    ...reportingTools(ctx),
+    ...budgetTools(ctx),
+    ...ruleTools(ctx),
+    ...trackingTools(ctx),
+    ...keywordTools(ctx),
+    ...accountTools(ctx),
+    ...systemTools(ctx),
   };
 
-  const allToolDefinitions = [...CAMPAIGN_TOOL_DEFINITIONS];
+  const allToolDefinitions = [
+    ...CAMPAIGN_TOOL_DEFINITIONS,
+    ...ADSET_TOOL_DEFINITIONS,
+    ...AD_TOOL_DEFINITIONS,
+    ...CREATIVE_TOOL_DEFINITIONS,
+    ...AUDIENCE_TOOL_DEFINITIONS,
+    ...REPORTING_TOOL_DEFINITIONS,
+    ...BUDGET_TOOL_DEFINITIONS,
+    ...RULE_TOOL_DEFINITIONS,
+    ...TRACKING_TOOL_DEFINITIONS,
+    ...KEYWORD_TOOL_DEFINITIONS,
+    ...ACCOUNT_TOOL_DEFINITIONS,
+    ...SYSTEM_TOOL_DEFINITIONS,
+  ];
 
   // ── MCP Server ────────────────────────────────────────────────────────────
   const server = new Server(
