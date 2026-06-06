@@ -65,6 +65,26 @@ All mutation tools call `enforceWritable()` from `src/safety/read-only.ts`. Addi
 
 `AdsError` (`src/utils/errors.ts`) carries a typed `ErrorCode`, platform identifier, and `retryable` flag. The MCP handler in `index.ts` catches these and returns structured JSON error responses.
 
+### Rate Limiting & Audit Logging
+
+- **RateLimiter** (`src/utils/rate-limiter.ts`) — `p-queue`-based, per-platform/account with concurrency=1 and 60s timeout. Prevents concurrent API calls to the same account.
+- **AuditLog** (`src/utils/audit-log.ts`) — append-only JSONL with daily rotation (`audit-YYYY-MM-DD.jsonl`). Chain-hashed (SHA256 of previous entry) for tamper evidence. Includes credential fingerprint, dry_run flag, and session UUID.
+
+### Request Flow
+
+```
+MCP CallToolRequest
+  → handler lookup (merged from all tool modules)
+  → resolveAccount() (explicit or config default)
+  → getAdapter() (from adapter map)
+  → enforceWritable() (for mutations)
+  → BudgetGuard / PathGuard / DeleteGuard (where applicable)
+  → RateLimiter queue
+  → adapter method (platform API call)
+  → AuditLog append
+  → unified model response (or AdsError → structured JSON error)
+```
+
 ## Key Conventions
 
 - ESM throughout (`"type": "module"` in package.json). All local imports use `.js` extensions.
@@ -74,3 +94,6 @@ All mutation tools call `enforceWritable()` from `src/safety/read-only.ts`. Addi
 - Read-only mode activated via `READ_ONLY=1` env var.
 - Config home overridable via `ADS_MCP_HOME` env var.
 - Budget safety defaults: $100/day per campaign, $5000 lifetime per campaign, $500/day account total.
+- All mutating tools support a `dry_run` parameter to preview changes.
+- Adding a new tool: export `*_TOOL_DEFINITIONS` array and `*Tools(ctx)` handler map from a file in `src/tools/`, then import and merge both in `src/index.ts`.
+- Adding a new platform: implement `BaseAdapter` (42 methods across campaigns/adsets/ads/audiences/reporting/budgets/rules/tracking/accounts), add `auth.ts` + `mapper.ts` in a new `src/adapters/<platform>/` directory, register the adapter in `src/index.ts`.

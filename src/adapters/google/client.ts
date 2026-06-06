@@ -439,7 +439,6 @@ export class GoogleAdapter implements BaseAdapter {
     limit: number,
     cursor?: string
   ): Promise<PaginatedResponse<UnifiedAdSet>> {
-    // Check if this is a keyword listing operation (passed from keyword tools)
     const gaql = `
       SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.campaign,
              ad_group.type, ad_group.cpc_bid_micros, ad_group.target_cpa_micros
@@ -488,11 +487,6 @@ export class GoogleAdapter implements BaseAdapter {
     ctx: AdapterContext,
     input: Record<string, unknown>
   ): Promise<UnifiedAdSet> {
-    // Handle keyword add operations routed through createAdSet
-    if (input['operation'] === 'add_keywords') {
-      return this._addKeywordsViaAdSet(ctx, input);
-    }
-
     const customerId = this.customerId(ctx);
     const campaignId = String(input['campaign_id'] ?? '');
     const name = String(input['name'] ?? 'New Ad Group');
@@ -515,41 +509,11 @@ export class GoogleAdapter implements BaseAdapter {
     return this.getAdSet(ctx, newId);
   }
 
-  private async _addKeywordsViaAdSet(
-    ctx: AdapterContext,
-    input: Record<string, unknown>
-  ): Promise<UnifiedAdSet> {
-    const customerId = this.customerId(ctx);
-    const adGroupId = String(input['ad_group_id'] ?? '');
-    const keywords = (input['keywords'] as string[] | undefined) ?? [];
-    const matchType = String(input['match_type'] ?? 'BROAD').toUpperCase();
-
-    const criteriaPayloads = keywords.map((kw) => ({
-      ad_group: `customers/${customerId}/adGroups/${adGroupId}`,
-      status: 'ENABLED',
-      keyword: { text: kw, match_type: matchType },
-    }));
-
-    for (const payload of criteriaPayloads) {
-      await this.mutate(ctx, 'adGroupCriteria', 'create', payload);
-    }
-
-    return this.getAdSet(ctx, adGroupId);
-  }
-
   async updateAdSet(
     ctx: AdapterContext,
     adsetId: string,
     updates: Record<string, unknown>
   ): Promise<UnifiedAdSet> {
-    // Handle keyword operations routed through updateAdSet
-    if (updates['operation'] === 'remove_keywords') {
-      return this._removeKeywordsViaAdSet(ctx, adsetId, updates);
-    }
-    if (updates['operation'] === 'add_negative_keywords') {
-      return this._addNegativeKeywordsViaAdSet(ctx, adsetId, updates);
-    }
-
     const customerId = this.customerId(ctx);
     const payload: Record<string, unknown> = {
       resource_name: `customers/${customerId}/adGroups/${adsetId}`,
@@ -568,74 +532,6 @@ export class GoogleAdapter implements BaseAdapter {
 
     await this.mutate(ctx, 'adGroups', 'update', payload);
     return this.getAdSet(ctx, adsetId);
-  }
-
-  private async _removeKeywordsViaAdSet(
-    ctx: AdapterContext,
-    adGroupId: string,
-    updates: Record<string, unknown>
-  ): Promise<UnifiedAdSet> {
-    const customerId = this.customerId(ctx);
-    const keywordIds = (updates['keyword_ids'] as string[] | undefined) ?? [];
-
-    for (const kwId of keywordIds) {
-      await this.mutate(ctx, 'adGroupCriteria', 'remove', {
-        resource_name: `customers/${customerId}/adGroupCriteria/${adGroupId}~${kwId}`,
-      });
-    }
-
-    return this.getAdSet(ctx, adGroupId);
-  }
-
-  private async _addNegativeKeywordsViaAdSet(
-    ctx: AdapterContext,
-    entityId: string,
-    updates: Record<string, unknown>
-  ): Promise<UnifiedAdSet> {
-    const customerId = this.customerId(ctx);
-    const keywords = (updates['keywords'] as string[] | undefined) ?? [];
-    const matchType = String(updates['match_type'] ?? 'BROAD').toUpperCase();
-    const entityType = String(updates['entity_type'] ?? 'campaign');
-
-    if (entityType === 'campaign') {
-      for (const kw of keywords) {
-        await this.mutate(ctx, 'campaignCriteria', 'create', {
-          campaign: `customers/${customerId}/campaigns/${entityId}`,
-          negative: true,
-          keyword: { text: kw, match_type: matchType },
-        });
-      }
-    } else {
-      // ad_group level
-      for (const kw of keywords) {
-        await this.mutate(ctx, 'adGroupCriteria', 'create', {
-          ad_group: `customers/${customerId}/adGroups/${entityId}`,
-          negative: true,
-          keyword: { text: kw, match_type: matchType },
-        });
-      }
-    }
-
-    // Return a placeholder adset shape (entityId may be a campaign id)
-    return this.getAdSet(ctx, entityId).catch(() => ({
-      id: entityId,
-      platform: 'google' as const,
-      campaign_id: entityId,
-      name: entityId,
-      status: 'active' as const,
-      targeting: {
-        locations: [],
-        interests: [],
-        behaviors: [],
-        audiences: [],
-        languages: [],
-        devices: [],
-        os: [],
-      },
-      bid: { strategy: 'lowest_cost' as const },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }));
   }
 
   async setAdSetStatus(
@@ -894,11 +790,6 @@ export class GoogleAdapter implements BaseAdapter {
     granularity: string,
     _attributionWindow?: AttributionWindow
   ): Promise<Record<string, unknown>[]> {
-    // Handle negative keyword listing routed from keyword tools
-    if (entityType.includes('negative_keywords')) {
-      return this._listNegativeKeywords(ctx, entityId, entityType);
-    }
-
     const startDate = toGaqlDate(dateRange.start_date);
     const endDate = dateRange.end_date
       ? toGaqlDate(dateRange.end_date)
@@ -949,14 +840,91 @@ export class GoogleAdapter implements BaseAdapter {
     });
   }
 
-  private async _listNegativeKeywords(
+  // ─── Keywords ──────────────────────────────────────────────────────────────
+
+  async listKeywords(
+    ctx: AdapterContext,
+    adGroupId: string,
+    limit: number,
+    cursor?: string
+  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+    const offset = cursor ? parseInt(cursor, 10) : 0;
+    const gaql = `
+      SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
+             ad_group_criterion.keyword.match_type, ad_group_criterion.status
+      FROM ad_group_criterion
+      WHERE ad_group.id = ${adGroupId}
+        AND ad_group_criterion.type = 'KEYWORD'
+        AND ad_group_criterion.negative = FALSE
+        AND ad_group_criterion.status != 'REMOVED'
+      LIMIT ${limit}
+      ${offset ? `OFFSET ${offset}` : ''}
+    `;
+    const rows = await this.query(ctx, gaql);
+    const data = rows.map((r) => {
+      const ac = (r as GoogleKeyword).ad_group_criterion ?? {};
+      return {
+        id: String(ac.criterion_id ?? ''),
+        text: ac.keyword?.text ?? '',
+        match_type: ac.keyword?.match_type ?? '',
+        status: ac.status ?? '',
+        ad_group_id: adGroupId,
+      };
+    });
+    const hasMore = rows.length === limit;
+
+    return {
+      data,
+      pagination: {
+        page: 1,
+        page_size: limit,
+        has_next_page: hasMore,
+        ...(hasMore && { next_cursor: String(offset + limit) }),
+        ...(offset > 0 && { prev_cursor: String(Math.max(0, offset - limit)) }),
+      },
+    };
+  }
+
+  async addKeywords(
+    ctx: AdapterContext,
+    adGroupId: string,
+    keywords: string[],
+    matchType: string
+  ): Promise<Record<string, unknown>> {
+    const customerId = this.customerId(ctx);
+    const mt = matchType.toUpperCase();
+
+    for (const kw of keywords) {
+      await this.mutate(ctx, 'adGroupCriteria', 'create', {
+        ad_group: `customers/${customerId}/adGroups/${adGroupId}`,
+        status: 'ENABLED',
+        keyword: { text: kw, match_type: mt },
+      });
+    }
+
+    return { ad_group_id: adGroupId, keywords_added: keywords.length };
+  }
+
+  async removeKeywords(
+    ctx: AdapterContext,
+    adGroupId: string,
+    keywordIds: string[]
+  ): Promise<void> {
+    const customerId = this.customerId(ctx);
+
+    for (const kwId of keywordIds) {
+      await this.mutate(ctx, 'adGroupCriteria', 'remove', {
+        resource_name: `customers/${customerId}/adGroupCriteria/${adGroupId}~${kwId}`,
+      });
+    }
+  }
+
+  async listNegativeKeywords(
     ctx: AdapterContext,
     entityId: string,
-    entityType: string
+    entityType: 'campaign' | 'ad_group'
   ): Promise<Record<string, unknown>[]> {
-    const isCampaign = entityType.includes('campaign');
-
-    if (isCampaign) {
+    if (entityType === 'campaign') {
       const gaql = `
         SELECT campaign_criterion.keyword.text, campaign_criterion.keyword.match_type,
                campaign_criterion.status, campaign_criterion.criterion_id
@@ -1005,17 +973,43 @@ export class GoogleAdapter implements BaseAdapter {
     }
   }
 
+  async addNegativeKeywords(
+    ctx: AdapterContext,
+    entityId: string,
+    entityType: 'campaign' | 'ad_group',
+    keywords: string[],
+    matchType: string
+  ): Promise<Record<string, unknown>> {
+    const customerId = this.customerId(ctx);
+    const mt = matchType.toUpperCase();
+
+    if (entityType === 'campaign') {
+      for (const kw of keywords) {
+        await this.mutate(ctx, 'campaignCriteria', 'create', {
+          campaign: `customers/${customerId}/campaigns/${entityId}`,
+          negative: true,
+          keyword: { text: kw, match_type: mt },
+        });
+      }
+    } else {
+      for (const kw of keywords) {
+        await this.mutate(ctx, 'adGroupCriteria', 'create', {
+          ad_group: `customers/${customerId}/adGroups/${entityId}`,
+          negative: true,
+          keyword: { text: kw, match_type: mt },
+        });
+      }
+    }
+
+    return { entity_id: entityId, entity_type: entityType, keywords_added: keywords.length };
+  }
+
   async getInsights(
     ctx: AdapterContext,
     entityId: string,
     breakdowns: string[],
     dateRange: DateRange
   ): Promise<Record<string, unknown>[]> {
-    // Handle search terms report routed from keyword tools
-    if (breakdowns.includes('search_term')) {
-      return this._getSearchTerms(ctx, entityId, dateRange);
-    }
-
     const startDate = toGaqlDate(dateRange.start_date);
     const endDate = dateRange.end_date
       ? toGaqlDate(dateRange.end_date)
@@ -1067,7 +1061,7 @@ export class GoogleAdapter implements BaseAdapter {
     });
   }
 
-  private async _getSearchTerms(
+  async getSearchTerms(
     ctx: AdapterContext,
     adGroupId: string,
     dateRange: DateRange

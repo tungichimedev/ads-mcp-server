@@ -191,6 +191,48 @@ export interface BaseAdapter {
     entityId: string
   ): Promise<Record<string, unknown>[]>;
 
+  // ─── Keywords (Google Ads only — others throw ACCOUNT_ISSUE) ─────────────────
+
+  listKeywords(
+    ctx: AdapterContext,
+    adGroupId: string,
+    limit: number,
+    cursor?: string
+  ): Promise<PaginatedResponse<Record<string, unknown>>>;
+
+  addKeywords(
+    ctx: AdapterContext,
+    adGroupId: string,
+    keywords: string[],
+    matchType: string
+  ): Promise<Record<string, unknown>>;
+
+  removeKeywords(
+    ctx: AdapterContext,
+    adGroupId: string,
+    keywordIds: string[]
+  ): Promise<void>;
+
+  listNegativeKeywords(
+    ctx: AdapterContext,
+    entityId: string,
+    entityType: 'campaign' | 'ad_group'
+  ): Promise<Record<string, unknown>[]>;
+
+  addNegativeKeywords(
+    ctx: AdapterContext,
+    entityId: string,
+    entityType: 'campaign' | 'ad_group',
+    keywords: string[],
+    matchType: string
+  ): Promise<Record<string, unknown>>;
+
+  getSearchTerms(
+    ctx: AdapterContext,
+    adGroupId: string,
+    dateRange: DateRange
+  ): Promise<Record<string, unknown>[]>;
+
   // ─── Account ─────────────────────────────────────────────────────────────────
 
   getAccountHealth(ctx: AdapterContext): Promise<Record<string, unknown>>;

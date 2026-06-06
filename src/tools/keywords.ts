@@ -11,13 +11,6 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : String(v ?? '');
 }
 
-function asRecord(v: unknown): Record<string, unknown> {
-  if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
-    return v as Record<string, unknown>;
-  }
-  return {};
-}
-
 function asStringArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.map((x) => String(x));
   return [];
@@ -70,9 +63,7 @@ export function keywordTools(ctx: ToolContext) {
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        // Keywords are represented as ad set children; use listAdSets as a proxy
-        // by passing the ad_group_id — the adapter knows how to route this.
-        return adapter.listAdSets(
+        return adapter.listKeywords(
           adapterCtx,
           adGroupId,
           typeof args['limit'] === 'number' ? args['limit'] : 50,
@@ -101,12 +92,7 @@ export function keywordTools(ctx: ToolContext) {
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        const result = await adapter.createAdSet(adapterCtx, {
-          ad_group_id: adGroupId,
-          keywords,
-          match_type: matchType,
-          operation: 'add_keywords',
-        });
+        const result = await adapter.addKeywords(adapterCtx, adGroupId, keywords, matchType);
 
         const fingerprint = await ctx.tokenManager
           .credentialFingerprint(platform, account)
@@ -145,10 +131,7 @@ export function keywordTools(ctx: ToolContext) {
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        const result = await adapter.updateAdSet(adapterCtx, adGroupId, {
-          keyword_ids: keywordIds,
-          operation: 'remove_keywords',
-        });
+        await adapter.removeKeywords(adapterCtx, adGroupId, keywordIds);
 
         const fingerprint = await ctx.tokenManager
           .credentialFingerprint(platform, account)
@@ -164,7 +147,7 @@ export function keywordTools(ctx: ToolContext) {
           result: 'ok',
         });
 
-        return result;
+        return { ad_group_id: adGroupId, removed: keywordIds.length };
       });
     },
 
@@ -175,18 +158,12 @@ export function keywordTools(ctx: ToolContext) {
       assertGoogle(platform);
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const entityId = str(args['entity_id']);
-      const entityType = str(args['entity_type'] ?? 'campaign');
+      const entityType = (str(args['entity_type'] ?? 'campaign')) as 'campaign' | 'ad_group';
 
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        return adapter.getPerformance(
-          adapterCtx,
-          `${entityType}_negative_keywords`,
-          entityId,
-          { start_date: '1970-01-01', end_date: '1970-01-01' },
-          'total',
-        );
+        return adapter.listNegativeKeywords(adapterCtx, entityId, entityType);
       });
     },
 
@@ -199,7 +176,7 @@ export function keywordTools(ctx: ToolContext) {
 
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const entityId = str(args['entity_id']);
-      const entityType = str(args['entity_type'] ?? 'campaign');
+      const entityType = (str(args['entity_type'] ?? 'campaign')) as 'campaign' | 'ad_group';
       const keywords = asStringArray(args['keywords']);
       const matchType = str(args['match_type'] ?? 'broad');
       const dryRun = args['dry_run'] === true;
@@ -211,12 +188,7 @@ export function keywordTools(ctx: ToolContext) {
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        const result = await adapter.updateAdSet(adapterCtx, entityId, {
-          keywords,
-          match_type: matchType,
-          entity_type: entityType,
-          operation: 'add_negative_keywords',
-        });
+        const result = await adapter.addNegativeKeywords(adapterCtx, entityId, entityType, keywords, matchType);
 
         const fingerprint = await ctx.tokenManager
           .credentialFingerprint(platform, account)
@@ -243,12 +215,12 @@ export function keywordTools(ctx: ToolContext) {
       assertGoogle(platform);
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const adGroupId = str(args['ad_group_id']);
-      const dateRange = asRecord(args['date_range']) as import('../models/platform.js').DateRange;
+      const dateRange = (args['date_range'] ?? {}) as import('../models/platform.js').DateRange;
 
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        return adapter.getInsights(adapterCtx, adGroupId, ['search_term'], dateRange);
+        return adapter.getSearchTerms(adapterCtx, adGroupId, dateRange);
       });
     },
   };
