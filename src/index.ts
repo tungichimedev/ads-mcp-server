@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
@@ -20,7 +21,7 @@ import { GoogleAdapter } from './adapters/google/client.js';
 import { registerTikTokRefreshHandler } from './adapters/tiktok/auth.js';
 import { TikTokAdapter } from './adapters/tiktok/client.js';
 import { RateLimiter } from './utils/rate-limiter.js';
-import { AuditLog } from './utils/audit-log.js';
+import { AuditLog, type AuditOutput } from './utils/audit-log.js';
 import { DeleteGuard } from './safety/delete-guard.js';
 
 import type { BaseAdapter } from './adapters/base.js';
@@ -101,7 +102,8 @@ async function main(): Promise<void> {
 
   // ── Infrastructure ────────────────────────────────────────────────────────
   const rateLimiter = new RateLimiter();
-  const auditLog = new AuditLog(join(adsMcpHome, 'audit'));
+  const auditOutput: AuditOutput = process.env['K_SERVICE'] ? 'stdout' : 'file';
+  const auditLog = new AuditLog(join(adsMcpHome, 'audit'), auditOutput);
   const deleteGuard = new DeleteGuard();
 
   // ── ToolContext ───────────────────────────────────────────────────────────
@@ -114,7 +116,51 @@ async function main(): Promise<void> {
     config,
   };
 
-  // ── Tool handlers ─────────────────────────────────────────────────────────
+  // ── Transport ───────────────────────────────────────────────────────────
+  const port = process.env['PORT'];
+  if (port) {
+    // ── HTTP mode (Cloud Run / container) ──────────────────────────────────
+    const { createMcpExpressApp } = await import('@modelcontextprotocol/sdk/server/express.js');
+    const app = createMcpExpressApp({ host: '0.0.0.0' });
+
+    app.get('/health', (_req, res) => {
+      res.json({ status: 'ok' });
+    });
+
+    app.post('/mcp', async (req, res) => {
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      const server = createServer(ctx);
+      try {
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+        res.on('close', () => { transport.close(); server.close(); });
+      } catch (error) {
+        if (!res.headersSent) {
+          res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
+        }
+      }
+    });
+
+    // Stateless mode — no SSE streams or session cleanup
+    app.get('/mcp', (_req, res) => { res.status(405).json({ error: 'Method not allowed' }); });
+    app.delete('/mcp', (_req, res) => { res.status(405).json({ error: 'Method not allowed' }); });
+
+    app.listen(Number(port), '0.0.0.0', () => {
+      process.stderr.write(`ads-mcp-server listening on 0.0.0.0:${port}\n`);
+    });
+  } else {
+    // ── stdio mode (local / CLI) ───────────────────────────────────────────
+    const server = createServer(ctx);
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Server factory — creates a fully-configured MCP Server instance
+// ---------------------------------------------------------------------------
+
+function createServer(ctx: ToolContext): Server {
   const allToolHandlers: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
     ...campaignTools(ctx),
     ...adsetTools(ctx),
@@ -145,18 +191,15 @@ async function main(): Promise<void> {
     ...SYSTEM_TOOL_DEFINITIONS,
   ];
 
-  // ── MCP Server ────────────────────────────────────────────────────────────
   const server = new Server(
     { name: 'ads-mcp-server', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
 
-  // List tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: allToolDefinitions,
   }));
 
-  // Call tool
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: rawArgs } = request.params;
     const args = (rawArgs ?? {}) as Record<string, unknown>;
@@ -196,14 +239,11 @@ async function main(): Promise<void> {
           isError: true,
         };
       }
-      // Unknown error — re-throw to let MCP SDK handle it
       throw err;
     }
   });
 
-  // ── Connect transport ─────────────────────────────────────────────────────
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  return server;
 }
 
 main().catch((err) => {
