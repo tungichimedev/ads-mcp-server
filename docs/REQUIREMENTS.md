@@ -2,7 +2,7 @@
 
 ## Overview
 
-An MCP (Model Context Protocol) server providing a unified interface for managing advertising campaigns across Meta (Facebook), Google Ads, and TikTok. The server exposes ~40 tools over the MCP protocol, enabling AI assistants and automation clients to read, create, update, and delete ad entities across all three platforms through a single consistent API.
+An MCP (Model Context Protocol) server providing a unified interface for managing advertising campaigns across Meta (Facebook), Google Ads, and TikTok. The server exposes ~45 tools over the MCP protocol, enabling AI assistants and automation clients to read, create, update, and delete ad entities across all three platforms through a single consistent API.
 
 ## Goals
 
@@ -142,7 +142,7 @@ Note: Rules are only fully supported on Meta. Google and TikTok return empty/thr
 | FR-10.3 | Remove keywords by ID. |
 | FR-10.4 | List negative keywords for a campaign or ad group. |
 | FR-10.5 | Add negative keywords to a campaign or ad group. |
-| FR-10.6 | Get search terms report for an ad group over a date range. |
+| FR-10.6 | Get search terms report for an ad group over a specified date range (required: start, end). |
 
 ### FR-11: Account Management
 
@@ -162,7 +162,7 @@ Note: Rules are only fully supported on Meta. Google and TikTok return empty/thr
 | ID | Requirement |
 |----|-------------|
 | FR-13.1 | All mutating tools support a `dry_run` parameter to preview changes without applying them. |
-| FR-13.2 | All list endpoints support cursor-based pagination (page_size 1-200, default 50). |
+| FR-13.2 | All list endpoints support cursor-based pagination (page_size 1-200, default 20). |
 | FR-13.3 | All tools accept explicit `account` parameter or fall back to platform default from config. |
 
 ---

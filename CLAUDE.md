@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-An MCP (Model Context Protocol) server that provides a unified interface for managing advertising campaigns across Meta (Facebook), Google Ads, and TikTok. It exposes ~40 tools for campaign/adset/ad CRUD, reporting, audiences, budgets, rules, tracking, and account management.
+An MCP (Model Context Protocol) server that provides a unified interface for managing advertising campaigns across Meta (Facebook), Google Ads, and TikTok. It exposes ~45 tools for campaign/adset/ad CRUD, reporting, audiences, budgets, rules, tracking, keywords, and account management.
 
 ## Commands
 
@@ -85,6 +85,8 @@ MCP CallToolRequest
   → unified model response (or AdsError → structured JSON error)
 ```
 
+For detailed architecture (system diagram, all layers, models, error codes, design decisions), see `docs/ARCHITECTURE.md`. For full requirements, see `docs/REQUIREMENTS.md`.
+
 ## Key Conventions
 
 - ESM throughout (`"type": "module"` in package.json). All local imports use `.js` extensions.
@@ -96,4 +98,4 @@ MCP CallToolRequest
 - Budget safety defaults: $100/day per campaign, $5000 lifetime per campaign, $500/day account total.
 - All mutating tools support a `dry_run` parameter to preview changes.
 - Adding a new tool: export `*_TOOL_DEFINITIONS` array and `*Tools(ctx)` handler map from a file in `src/tools/`, then import and merge both in `src/index.ts`.
-- Adding a new platform: implement `BaseAdapter` (42 methods across campaigns/adsets/ads/audiences/reporting/budgets/rules/tracking/accounts), add `auth.ts` + `mapper.ts` in a new `src/adapters/<platform>/` directory, register the adapter in `src/index.ts`.
+- Adding a new platform: implement `BaseAdapter` (45 methods across campaigns/adsets/ads/audiences/reporting/budgets/rules/tracking/keywords/accounts), add `auth.ts` + `mapper.ts` in a new `src/adapters/<platform>/` directory, register the adapter in `src/index.ts`.

@@ -114,7 +114,7 @@ Set `READ_ONLY=1` to prevent any write operations (recommended when exploring).
 | **Budgets** | `get_budget` |
 | **Rules** | `list_rules`, `create_rule`, `update_rule`, `delete_rule`, `get_rule_history` |
 | **Tracking** | `list_pixels`, `get_pixel_status`, `list_conversion_events`, `get_event_match_quality`, `validate_tracking_urls` |
-| **Keywords** | Google Ads keyword tools |
+| **Keywords** | `list_keywords`, `add_keywords`, `remove_keywords`, `list_negative_keywords`, `add_negative_keywords`, `get_search_terms` |
 | **Accounts** | `list_accounts`, `get_account_health` |
 | **System** | `list_platforms` |
 

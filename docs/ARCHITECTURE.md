@@ -202,6 +202,7 @@ Platform-agnostic data types used across all tools and adapters:
 | `platform.ts` | `Platform`, `Status`, `DateRange`, enums | Shared enums and value types |
 | `rule.ts` | `UnifiedRule`, `RuleCondition`, `RuleAction` | 5 action types, AND/OR conditions |
 | `tracking.ts` | `PixelStatus`, `ConversionEvent` | 10 event types |
+| `keyword.ts` | `UnifiedKeyword`, `UnifiedSearchTerm`, `KeywordMutationResult` | Google Ads only |
 
 All models use Zod schemas for validation.
 

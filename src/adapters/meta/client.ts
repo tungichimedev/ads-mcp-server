@@ -1014,9 +1014,7 @@ export class MetaAdapter implements BaseAdapter {
     return [resp as unknown as Record<string, unknown>];
   }
 
-  // ─── Account ──────────────────────────────────────────────────────────────────
-
-  // ─── Keywords (not supported on Meta) ──────────────────────────────────
+  // ─── Keywords (not supported on Meta — defense-in-depth: tool layer also blocks non-Google)
 
   async listKeywords(): Promise<never> {
     throw new AdsError('ACCOUNT_ISSUE', 'meta', 'Keyword tools are only available for Google Ads', false);

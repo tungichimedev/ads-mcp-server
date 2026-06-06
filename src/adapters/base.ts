@@ -3,6 +3,7 @@ import type { UnifiedCampaign } from '../models/campaign.js';
 import type { UnifiedAdSet } from '../models/adset.js';
 import type { UnifiedAd } from '../models/ad.js';
 import type { DateRange, AttributionWindow } from '../models/platform.js';
+import type { UnifiedKeyword, UnifiedSearchTerm, KeywordMutationResult } from '../models/keyword.js';
 
 export interface AdapterContext {
   account: string;
@@ -198,14 +199,14 @@ export interface BaseAdapter {
     adGroupId: string,
     limit: number,
     cursor?: string
-  ): Promise<PaginatedResponse<Record<string, unknown>>>;
+  ): Promise<PaginatedResponse<UnifiedKeyword>>;
 
   addKeywords(
     ctx: AdapterContext,
     adGroupId: string,
     keywords: string[],
     matchType: string
-  ): Promise<Record<string, unknown>>;
+  ): Promise<KeywordMutationResult>;
 
   removeKeywords(
     ctx: AdapterContext,
@@ -217,7 +218,7 @@ export interface BaseAdapter {
     ctx: AdapterContext,
     entityId: string,
     entityType: 'campaign' | 'ad_group'
-  ): Promise<Record<string, unknown>[]>;
+  ): Promise<UnifiedKeyword[]>;
 
   addNegativeKeywords(
     ctx: AdapterContext,
@@ -225,13 +226,13 @@ export interface BaseAdapter {
     entityType: 'campaign' | 'ad_group',
     keywords: string[],
     matchType: string
-  ): Promise<Record<string, unknown>>;
+  ): Promise<KeywordMutationResult>;
 
   getSearchTerms(
     ctx: AdapterContext,
     adGroupId: string,
     dateRange: DateRange
-  ): Promise<Record<string, unknown>[]>;
+  ): Promise<UnifiedSearchTerm[]>;
 
   // ─── Account ─────────────────────────────────────────────────────────────────
 

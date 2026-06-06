@@ -31,7 +31,7 @@ function buildAdapterCtx(
 }
 
 // ---------------------------------------------------------------------------
-// Google-only guard
+// Google-only guard (defense-in-depth: adapter stubs also reject non-Google)
 // ---------------------------------------------------------------------------
 
 function assertGoogle(platform: string): void {
@@ -43,6 +43,43 @@ function assertGoogle(platform: string): void {
       false,
     );
   }
+}
+
+function assertEntityType(value: string): asserts value is 'campaign' | 'ad_group' {
+  if (value !== 'campaign' && value !== 'ad_group') {
+    throw new AdsError(
+      'ACCOUNT_ISSUE',
+      'google',
+      `Invalid entity_type: expected "campaign" or "ad_group", got "${value}"`,
+      false,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audit helper for read operations
+// ---------------------------------------------------------------------------
+
+async function auditRead(
+  ctx: ToolContext,
+  tool: string,
+  platform: string,
+  account: string,
+  params: Record<string, unknown>,
+): Promise<void> {
+  const fingerprint = await ctx.tokenManager
+    .credentialFingerprint(platform, account)
+    .catch(() => 'unknown');
+
+  ctx.auditLog.log({
+    tool,
+    platform,
+    account,
+    credential_fingerprint: fingerprint,
+    dry_run: false,
+    params,
+    result: 'ok',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -59,16 +96,19 @@ export function keywordTools(ctx: ToolContext) {
       assertGoogle(platform);
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const adGroupId = str(args['ad_group_id']);
+      const limit = typeof args['limit'] === 'number' ? args['limit'] : 20;
 
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        return adapter.listKeywords(
+        const result = await adapter.listKeywords(
           adapterCtx,
           adGroupId,
-          typeof args['limit'] === 'number' ? args['limit'] : 50,
+          limit,
           args['cursor'] as string | undefined,
         );
+        await auditRead(ctx, 'list_keywords', platform, account, { ad_group_id: adGroupId, limit });
+        return result;
       });
     },
 
@@ -158,12 +198,15 @@ export function keywordTools(ctx: ToolContext) {
       assertGoogle(platform);
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const entityId = str(args['entity_id']);
-      const entityType = (str(args['entity_type'] ?? 'campaign')) as 'campaign' | 'ad_group';
+      const entityType = str(args['entity_type'] ?? 'campaign');
+      assertEntityType(entityType);
 
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        return adapter.listNegativeKeywords(adapterCtx, entityId, entityType);
+        const result = await adapter.listNegativeKeywords(adapterCtx, entityId, entityType);
+        await auditRead(ctx, 'list_negative_keywords', platform, account, { entity_id: entityId, entity_type: entityType });
+        return result;
       });
     },
 
@@ -176,7 +219,8 @@ export function keywordTools(ctx: ToolContext) {
 
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const entityId = str(args['entity_id']);
-      const entityType = (str(args['entity_type'] ?? 'campaign')) as 'campaign' | 'ad_group';
+      const entityType = str(args['entity_type'] ?? 'campaign');
+      assertEntityType(entityType);
       const keywords = asStringArray(args['keywords']);
       const matchType = str(args['match_type'] ?? 'broad');
       const dryRun = args['dry_run'] === true;
@@ -215,12 +259,20 @@ export function keywordTools(ctx: ToolContext) {
       assertGoogle(platform);
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const adGroupId = str(args['ad_group_id']);
-      const dateRange = (args['date_range'] ?? {}) as import('../models/platform.js').DateRange;
+      const rawRange = (args['date_range'] ?? {}) as Record<string, unknown>;
+      const dateRange: import('../models/platform.js').DateRange = {
+        start_date: String(rawRange['start_date'] ?? rawRange['start'] ?? ''),
+        end_date: rawRange['end_date'] ?? rawRange['end']
+          ? String(rawRange['end_date'] ?? rawRange['end'])
+          : undefined,
+      };
 
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
         const adapterCtx = buildAdapterCtx(ctx, platform, account);
-        return adapter.getSearchTerms(adapterCtx, adGroupId, dateRange);
+        const result = await adapter.getSearchTerms(adapterCtx, adGroupId, dateRange);
+        await auditRead(ctx, 'get_search_terms', platform, account, { ad_group_id: adGroupId, date_range: dateRange });
+        return result;
       });
     },
   };
@@ -279,7 +331,7 @@ export const KEYWORD_TOOL_DEFINITIONS = [
   },
   {
     name: 'list_negative_keywords',
-    description: 'List negative keywords for a Google Ads campaign or ad group. Google only.',
+    description: 'List negative keywords for a Google Ads campaign or ad group (max 1000). Google only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -310,7 +362,7 @@ export const KEYWORD_TOOL_DEFINITIONS = [
   },
   {
     name: 'get_search_terms',
-    description: 'Get search terms report for a Google Ads ad group. Google only.',
+    description: 'Get search terms report for a Google Ads ad group over a date range (start and end required). Google only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -319,11 +371,12 @@ export const KEYWORD_TOOL_DEFINITIONS = [
         ad_group_id: { type: 'string' },
         date_range: {
           type: 'object',
+          description: 'Date range (YYYY-MM-DD). Accepts start_date/end_date or start/end.',
           properties: {
-            start: { type: 'string' },
-            end: { type: 'string' },
+            start_date: { type: 'string' },
+            end_date: { type: 'string' },
           },
-          required: ['start', 'end'],
+          required: ['start_date', 'end_date'],
         },
       },
       required: ['platform', 'ad_group_id', 'date_range'],

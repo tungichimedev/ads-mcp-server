@@ -1109,7 +1109,7 @@ export class TikTokAdapter implements BaseAdapter {
     }
   }
 
-  // ─── Keywords (not supported on TikTok) ─────────────────────────────────────
+  // ─── Keywords (not supported on TikTok — defense-in-depth: tool layer also blocks non-Google)
 
   async listKeywords(): Promise<never> {
     throw new AdsError('ACCOUNT_ISSUE', 'tiktok', 'Keyword tools are only available for Google Ads', false);

@@ -5,6 +5,7 @@ import type { UnifiedAdSet } from '../../models/adset.js';
 import type { UnifiedAd } from '../../models/ad.js';
 import type { DateRange, AttributionWindow, Status } from '../../models/platform.js';
 import { AdsError } from '../../utils/errors.js';
+import type { UnifiedKeyword, UnifiedSearchTerm, KeywordMutationResult } from '../../models/keyword.js';
 import {
   toGoogleCampaignType,
   fromGoogleCampaign,
@@ -85,6 +86,21 @@ interface GoogleSearchTerm {
   campaign: { id: string };
 }
 
+// ─── GAQL safety ──────────────────────────────────────────────────────────
+
+/** Validates that an ID is safe for GAQL interpolation (digits only) and returns it. */
+function safeId(id: string): string {
+  if (!/^\d+$/.test(id)) {
+    throw new AdsError(
+      'ACCOUNT_ISSUE',
+      'google',
+      `Invalid entity ID for GAQL query: expected numeric, got "${id}"`,
+      false,
+    );
+  }
+  return id;
+}
+
 // ─── Mapping helpers ───────────────────────────────────────────────────────
 
 function mapGoogleAdGroup(row: GoogleAdGroup, campaignId: string): UnifiedAdSet {
@@ -161,9 +177,18 @@ function mapGoogleAd(row: GoogleAd): UnifiedAd {
 
 // ─── Date conversion ───────────────────────────────────────────────────────
 
-/** ISO date YYYY-MM-DD → YYYYMMDD for GAQL WHERE clauses */
+/** ISO date YYYY-MM-DD → YYYYMMDD for GAQL WHERE clauses. Validates format. */
 function toGaqlDate(iso: string): string {
-  return iso.replace(/-/g, '');
+  const stripped = iso.replace(/-/g, '');
+  if (!/^\d{8}$/.test(stripped)) {
+    throw new AdsError(
+      'ACCOUNT_ISSUE',
+      'google',
+      `Invalid date for GAQL query: expected YYYY-MM-DD or YYYYMMDD, got "${iso}"`,
+      false,
+    );
+  }
+  return stripped;
 }
 
 // ─── GoogleAdapter ─────────────────────────────────────────────────────────
@@ -220,6 +245,35 @@ export class GoogleAdapter implements BaseAdapter {
         return await svc.remove(data);
       }
       return await svc[operation](data);
+    } catch (err) {
+      if (err instanceof AdsError) throw err;
+      throw this.handleError(err);
+    }
+  }
+
+  private async mutateBatch(
+    ctx: AdapterContext,
+    resource: string,
+    operation: 'create' | 'remove',
+    items: Record<string, unknown>[]
+  ): Promise<any[]> {
+    if (items.length === 0) return [];
+    try {
+      const customer = await this.getClient(ctx.account);
+      const svc = customer[resource];
+      if (!svc) {
+        throw new AdsError('ACCOUNT_ISSUE', 'google', `Unknown resource: ${resource}`, false);
+      }
+      const batchFn = svc[`${operation}Batch`] ?? svc[`${operation}All`];
+      if (typeof batchFn === 'function') {
+        return await batchFn.call(svc, items);
+      }
+      // Fallback: sequential if batch not available
+      const results: any[] = [];
+      for (const item of items) {
+        results.push(await this.mutate(ctx, resource, operation, item));
+      }
+      return results;
     } catch (err) {
       if (err instanceof AdsError) throw err;
       throw this.handleError(err);
@@ -290,7 +344,7 @@ export class GoogleAdapter implements BaseAdapter {
              campaign.start_date, campaign.end_date,
              campaign_budget.amount_micros, campaign_budget.period
       FROM campaign
-      WHERE campaign.id = ${campaignId}
+      WHERE campaign.id = ${safeId(campaignId)}
       LIMIT 1
     `;
     const rows = await this.query(ctx, gaql);
@@ -375,7 +429,7 @@ export class GoogleAdapter implements BaseAdapter {
         const gaql = `
           SELECT campaign_budget.resource_name
           FROM campaign
-          WHERE campaign.id = ${campaignId}
+          WHERE campaign.id = ${safeId(campaignId)}
           LIMIT 1
         `;
         const rows = await this.query(ctx, gaql);
@@ -443,7 +497,7 @@ export class GoogleAdapter implements BaseAdapter {
       SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.campaign,
              ad_group.type, ad_group.cpc_bid_micros, ad_group.target_cpa_micros
       FROM ad_group
-      WHERE ad_group.campaign.id = ${campaignId}
+      WHERE ad_group.campaign.id = ${safeId(campaignId)}
         AND ad_group.status != 'REMOVED'
       LIMIT ${limit}
     `;
@@ -469,7 +523,7 @@ export class GoogleAdapter implements BaseAdapter {
       SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.campaign,
              ad_group.type, ad_group.cpc_bid_micros, ad_group.target_cpa_micros
       FROM ad_group
-      WHERE ad_group.id = ${adsetId}
+      WHERE ad_group.id = ${safeId(adsetId)}
       LIMIT 1
     `;
     const rows = await this.query(ctx, gaql);
@@ -567,7 +621,7 @@ export class GoogleAdapter implements BaseAdapter {
              ad_group_ad.ad.expanded_text_ad.description,
              campaign.id, ad_group.id
       FROM ad_group_ad
-      WHERE ad_group.id = ${adsetId}
+      WHERE ad_group.id = ${safeId(adsetId)}
         AND ad_group_ad.status != 'REMOVED'
       LIMIT ${limit}
     `;
@@ -598,7 +652,7 @@ export class GoogleAdapter implements BaseAdapter {
              ad_group_ad.ad.expanded_text_ad.description,
              campaign.id, ad_group.id
       FROM ad_group_ad
-      WHERE ad_group_ad.ad.id = ${adId}
+      WHERE ad_group_ad.ad.id = ${safeId(adId)}
       LIMIT 1
     `;
     const rows = await this.query(ctx, gaql);
@@ -805,7 +859,7 @@ export class GoogleAdapter implements BaseAdapter {
              metrics.ctr, metrics.average_cpc, metrics.conversions,
              metrics.cost_per_conversion, metrics.conversions_value
       FROM ${entityType === 'ad_group' ? 'ad_group' : 'campaign'}
-      WHERE ${entityField}.id = ${entityId}
+      WHERE ${entityField}.id = ${safeId(entityId)}
         AND segments.date BETWEEN '${startDate}' AND '${endDate}'
     `;
 
@@ -816,7 +870,7 @@ export class GoogleAdapter implements BaseAdapter {
                metrics.ctr, metrics.average_cpc, metrics.conversions,
                metrics.cost_per_conversion, metrics.conversions_value
         FROM ${entityType === 'ad_group' ? 'ad_group' : 'campaign'}
-        WHERE ${entityField}.id = ${entityId}
+        WHERE ${entityField}.id = ${safeId(entityId)}
           AND segments.date BETWEEN '${startDate}' AND '${endDate}'
       `;
     }
@@ -840,6 +894,62 @@ export class GoogleAdapter implements BaseAdapter {
     });
   }
 
+  async getInsights(
+    ctx: AdapterContext,
+    entityId: string,
+    breakdowns: string[],
+    dateRange: DateRange
+  ): Promise<Record<string, unknown>[]> {
+    const startDate = toGaqlDate(dateRange.start_date);
+    const endDate = dateRange.end_date
+      ? toGaqlDate(dateRange.end_date)
+      : toGaqlDate(dateRange.start_date);
+
+    const segmentMap: Record<string, string> = {
+      age: 'segments.age_range',
+      gender: 'segments.gender',
+      device: 'segments.device',
+      network: 'segments.ad_network_type',
+    };
+
+    const selectedSegments = breakdowns
+      .map((b) => segmentMap[b])
+      .filter(Boolean);
+
+    const segmentSelect = selectedSegments.length
+      ? ', ' + selectedSegments.join(', ')
+      : '';
+
+    const gaql = `
+      SELECT metrics.impressions, metrics.clicks, metrics.cost_micros,
+             metrics.ctr, metrics.average_cpc${segmentSelect}
+      FROM campaign
+      WHERE campaign.id = ${safeId(entityId)}
+        AND segments.date BETWEEN '${startDate}' AND '${endDate}'
+    `;
+
+    const rows = await this.query(ctx, gaql);
+    return rows.map((r) => {
+      const metrics = (r as any).metrics ?? {};
+      const segments = (r as any).segments ?? {};
+      return {
+        impressions: parseInt(metrics.impressions ?? '0', 10),
+        clicks: parseInt(metrics.clicks ?? '0', 10),
+        spend: microsToBase(parseInt(metrics.cost_micros ?? '0', 10)),
+        ctr: metrics.ctr ?? 0,
+        cpc: microsToBase(parseInt(metrics.average_cpc ?? '0', 10)),
+        ...breakdowns.reduce((acc, b) => {
+          const segKey = segmentMap[b];
+          if (segKey) {
+            const segParts = segKey.split('.');
+            acc[b] = segments[segParts[segParts.length - 1]];
+          }
+          return acc;
+        }, {} as Record<string, unknown>),
+      };
+    });
+  }
+
   // ─── Keywords ──────────────────────────────────────────────────────────────
 
   async listKeywords(
@@ -847,13 +957,13 @@ export class GoogleAdapter implements BaseAdapter {
     adGroupId: string,
     limit: number,
     cursor?: string
-  ): Promise<PaginatedResponse<Record<string, unknown>>> {
+  ): Promise<PaginatedResponse<UnifiedKeyword>> {
     const offset = cursor ? parseInt(cursor, 10) : 0;
     const gaql = `
       SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
              ad_group_criterion.keyword.match_type, ad_group_criterion.status
       FROM ad_group_criterion
-      WHERE ad_group.id = ${adGroupId}
+      WHERE ad_group.id = ${safeId(adGroupId)}
         AND ad_group_criterion.type = 'KEYWORD'
         AND ad_group_criterion.negative = FALSE
         AND ad_group_criterion.status != 'REMOVED'
@@ -890,17 +1000,16 @@ export class GoogleAdapter implements BaseAdapter {
     adGroupId: string,
     keywords: string[],
     matchType: string
-  ): Promise<Record<string, unknown>> {
+  ): Promise<KeywordMutationResult> {
     const customerId = this.customerId(ctx);
     const mt = matchType.toUpperCase();
 
-    for (const kw of keywords) {
-      await this.mutate(ctx, 'adGroupCriteria', 'create', {
-        ad_group: `customers/${customerId}/adGroups/${adGroupId}`,
-        status: 'ENABLED',
-        keyword: { text: kw, match_type: mt },
-      });
-    }
+    const items = keywords.map((kw) => ({
+      ad_group: `customers/${customerId}/adGroups/${adGroupId}`,
+      status: 'ENABLED',
+      keyword: { text: kw, match_type: mt },
+    }));
+    await this.mutateBatch(ctx, 'adGroupCriteria', 'create', items);
 
     return { ad_group_id: adGroupId, keywords_added: keywords.length };
   }
@@ -912,24 +1021,23 @@ export class GoogleAdapter implements BaseAdapter {
   ): Promise<void> {
     const customerId = this.customerId(ctx);
 
-    for (const kwId of keywordIds) {
-      await this.mutate(ctx, 'adGroupCriteria', 'remove', {
-        resource_name: `customers/${customerId}/adGroupCriteria/${adGroupId}~${kwId}`,
-      });
-    }
+    const items = keywordIds.map((kwId) => ({
+      resource_name: `customers/${customerId}/adGroupCriteria/${adGroupId}~${kwId}`,
+    }));
+    await this.mutateBatch(ctx, 'adGroupCriteria', 'remove', items);
   }
 
   async listNegativeKeywords(
     ctx: AdapterContext,
     entityId: string,
     entityType: 'campaign' | 'ad_group'
-  ): Promise<Record<string, unknown>[]> {
+  ): Promise<UnifiedKeyword[]> {
     if (entityType === 'campaign') {
       const gaql = `
         SELECT campaign_criterion.keyword.text, campaign_criterion.keyword.match_type,
                campaign_criterion.status, campaign_criterion.criterion_id
         FROM campaign_criterion
-        WHERE campaign.id = ${entityId}
+        WHERE campaign.id = ${safeId(entityId)}
           AND campaign_criterion.negative = TRUE
           AND campaign_criterion.type = 'KEYWORD'
         LIMIT 1000
@@ -952,7 +1060,7 @@ export class GoogleAdapter implements BaseAdapter {
         SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
                ad_group_criterion.status, ad_group_criterion.criterion_id
         FROM ad_group_criterion
-        WHERE ad_group.id = ${entityId}
+        WHERE ad_group.id = ${safeId(entityId)}
           AND ad_group_criterion.negative = TRUE
           AND ad_group_criterion.type = 'KEYWORD'
         LIMIT 1000
@@ -979,93 +1087,34 @@ export class GoogleAdapter implements BaseAdapter {
     entityType: 'campaign' | 'ad_group',
     keywords: string[],
     matchType: string
-  ): Promise<Record<string, unknown>> {
+  ): Promise<KeywordMutationResult> {
     const customerId = this.customerId(ctx);
     const mt = matchType.toUpperCase();
 
     if (entityType === 'campaign') {
-      for (const kw of keywords) {
-        await this.mutate(ctx, 'campaignCriteria', 'create', {
-          campaign: `customers/${customerId}/campaigns/${entityId}`,
-          negative: true,
-          keyword: { text: kw, match_type: mt },
-        });
-      }
+      const items = keywords.map((kw) => ({
+        campaign: `customers/${customerId}/campaigns/${entityId}`,
+        negative: true,
+        keyword: { text: kw, match_type: mt },
+      }));
+      await this.mutateBatch(ctx, 'campaignCriteria', 'create', items);
     } else {
-      for (const kw of keywords) {
-        await this.mutate(ctx, 'adGroupCriteria', 'create', {
-          ad_group: `customers/${customerId}/adGroups/${entityId}`,
-          negative: true,
-          keyword: { text: kw, match_type: mt },
-        });
-      }
+      const items = keywords.map((kw) => ({
+        ad_group: `customers/${customerId}/adGroups/${entityId}`,
+        negative: true,
+        keyword: { text: kw, match_type: mt },
+      }));
+      await this.mutateBatch(ctx, 'adGroupCriteria', 'create', items);
     }
 
     return { entity_id: entityId, entity_type: entityType, keywords_added: keywords.length };
-  }
-
-  async getInsights(
-    ctx: AdapterContext,
-    entityId: string,
-    breakdowns: string[],
-    dateRange: DateRange
-  ): Promise<Record<string, unknown>[]> {
-    const startDate = toGaqlDate(dateRange.start_date);
-    const endDate = dateRange.end_date
-      ? toGaqlDate(dateRange.end_date)
-      : toGaqlDate(dateRange.start_date);
-
-    // Map unified breakdowns to Google segments
-    const segmentMap: Record<string, string> = {
-      age: 'segments.age_range',
-      gender: 'segments.gender',
-      device: 'segments.device',
-      network: 'segments.ad_network_type',
-    };
-
-    const selectedSegments = breakdowns
-      .map((b) => segmentMap[b])
-      .filter(Boolean);
-
-    const segmentSelect = selectedSegments.length
-      ? ', ' + selectedSegments.join(', ')
-      : '';
-
-    const gaql = `
-      SELECT metrics.impressions, metrics.clicks, metrics.cost_micros,
-             metrics.ctr, metrics.average_cpc${segmentSelect}
-      FROM campaign
-      WHERE campaign.id = ${entityId}
-        AND segments.date BETWEEN '${startDate}' AND '${endDate}'
-    `;
-
-    const rows = await this.query(ctx, gaql);
-    return rows.map((r) => {
-      const metrics = (r as any).metrics ?? {};
-      const segments = (r as any).segments ?? {};
-      return {
-        impressions: parseInt(metrics.impressions ?? '0', 10),
-        clicks: parseInt(metrics.clicks ?? '0', 10),
-        spend: microsToBase(parseInt(metrics.cost_micros ?? '0', 10)),
-        ctr: metrics.ctr ?? 0,
-        cpc: microsToBase(parseInt(metrics.average_cpc ?? '0', 10)),
-        ...breakdowns.reduce((acc, b) => {
-          const segKey = segmentMap[b];
-          if (segKey) {
-            const segParts = segKey.split('.');
-            acc[b] = segments[segParts[segParts.length - 1]];
-          }
-          return acc;
-        }, {} as Record<string, unknown>),
-      };
-    });
   }
 
   async getSearchTerms(
     ctx: AdapterContext,
     adGroupId: string,
     dateRange: DateRange
-  ): Promise<Record<string, unknown>[]> {
+  ): Promise<UnifiedSearchTerm[]> {
     const startDate = toGaqlDate(dateRange.start_date);
     const endDate = dateRange.end_date
       ? toGaqlDate(dateRange.end_date)
@@ -1077,7 +1126,7 @@ export class GoogleAdapter implements BaseAdapter {
              metrics.ctr, metrics.average_cpc, metrics.conversions,
              segments.date, ad_group.id, campaign.id
       FROM search_term_view
-      WHERE ad_group.id = ${adGroupId}
+      WHERE ad_group.id = ${safeId(adGroupId)}
         AND segments.date BETWEEN '${startDate}' AND '${endDate}'
       LIMIT 1000
     `;
@@ -1108,7 +1157,7 @@ export class GoogleAdapter implements BaseAdapter {
       SELECT campaign.id, campaign_budget.amount_micros, campaign_budget.period,
              metrics.cost_micros
       FROM campaign
-      WHERE campaign.id = ${campaignId}
+      WHERE campaign.id = ${safeId(campaignId)}
         AND segments.date = '${toGaqlDate(new Date().toISOString().slice(0, 10))}'
       LIMIT 1
     `;
@@ -1225,7 +1274,7 @@ export class GoogleAdapter implements BaseAdapter {
       SELECT conversion_action.id, conversion_action.name, conversion_action.type,
              conversion_action.status, conversion_action.tag_snippets
       FROM conversion_action
-      WHERE conversion_action.id = ${pixelId}
+      WHERE conversion_action.id = ${safeId(pixelId)}
       LIMIT 1
     `;
     const rows = await this.query(ctx, gaql);
@@ -1291,7 +1340,7 @@ export class GoogleAdapter implements BaseAdapter {
              ad_group_ad.ad.url_custom_parameters, ad_group_ad.ad.id,
              ad_group.id, campaign.id
       FROM ad_group_ad
-      WHERE ${resourceField}.id = ${entityId}
+      WHERE ${resourceField}.id = ${safeId(entityId)}
         AND ad_group_ad.status != 'REMOVED'
       LIMIT 100
     `;
