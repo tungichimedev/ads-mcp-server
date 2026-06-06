@@ -103,10 +103,46 @@ const FALLBACK_CONFIG: AdsConfig = {
 };
 
 /**
+ * Loads config from Google Cloud Secret Manager (`ads-mcp-config` secret).
+ * Used when running on Cloud Run (detected via K_SERVICE env var).
+ * Returns FALLBACK_CONFIG on any error so the server can still start.
+ */
+async function loadConfigFromSecret(): Promise<AdsConfig> {
+  try {
+    // Dynamic import — package installed at deploy time, not at dev time.
+    const mod = await import('@google-cloud/secret-manager' as string);
+    const { SecretManagerServiceClient } = mod;
+    const client = new SecretManagerServiceClient();
+    const [version] = await client.accessSecretVersion({
+      name: 'projects/-/secrets/ads-mcp-config/versions/latest',
+    });
+    const payload = version.payload?.data;
+    if (!payload) {
+      return FALLBACK_CONFIG;
+    }
+    const text =
+      typeof payload === 'string'
+        ? payload
+        : new TextDecoder().decode(payload as Uint8Array);
+    return parseConfig(JSON.parse(text));
+  } catch {
+    return FALLBACK_CONFIG;
+  }
+}
+
+/**
  * Reads `config.json` from basePath and parses it.
  * Falls back to FALLBACK_CONFIG if the file does not exist.
+ *
+ * When running on Cloud Run (K_SERVICE env var set), loads config from
+ * Google Cloud Secret Manager instead of the filesystem.
  */
 export async function loadConfig(basePath: string): Promise<AdsConfig> {
+  // On Cloud Run, load from Secret Manager instead of filesystem.
+  if (process.env['K_SERVICE']) {
+    return loadConfigFromSecret();
+  }
+
   const configPath = join(basePath, 'config.json');
   let raw: unknown;
 
