@@ -18,12 +18,19 @@ interface LogLine extends AuditEntry {
   chain_hash: string;
 }
 
+export type AuditOutput = 'file' | 'stdout';
+
 export class AuditLog {
   private readonly sessionId: string;
   private lastHash: string;
 
-  constructor(private readonly basePath: string) {
-    mkdirSync(basePath, { recursive: true });
+  constructor(
+    private readonly basePath: string,
+    private readonly output: AuditOutput = 'file',
+  ) {
+    if (output === 'file') {
+      mkdirSync(basePath, { recursive: true });
+    }
     this.sessionId = randomUUID();
     this.lastHash = 'genesis';
   }
@@ -47,6 +54,10 @@ export class AuditLog {
       ...entry,
     };
 
-    appendFileSync(this.currentLogPath(), JSON.stringify(line) + '\n', 'utf-8');
+    if (this.output === 'stdout') {
+      console.log(JSON.stringify(line));
+    } else {
+      appendFileSync(this.currentLogPath(), JSON.stringify(line) + '\n', 'utf-8');
+    }
   }
 }
