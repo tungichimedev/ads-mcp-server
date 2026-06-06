@@ -13,9 +13,17 @@ let provider: KeychainProvider | null = null;
 
 /**
  * Dynamically imports keytar and stores it as the active provider.
- * Must be called once at startup before any getSecret / setSecret calls.
+ * On Cloud Run (K_SERVICE env var set), uses Secret Manager instead.
  */
 export async function initKeychain(): Promise<void> {
+  if (process.env['K_SERVICE']) {
+    const { SecretManagerServiceClient } = await import('@google-cloud/secret-manager');
+    const { SecretManagerKeychainProvider } = await import('./secret-manager.js');
+    const client = new SecretManagerServiceClient();
+    provider = new SecretManagerKeychainProvider(client);
+    return;
+  }
+
   const keytar = await import('keytar');
   provider = {
     getPassword: (service, account) => keytar.default.getPassword(service, account),
