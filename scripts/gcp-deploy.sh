@@ -3,6 +3,7 @@ set -euo pipefail
 PROJECT_ID="${GCP_PROJECT_ID:-ads-mcp-server}"
 REGION="${GCP_REGION:-us-central1}"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/ads-mcp-server/ads-mcp-server"
+gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet 2>/dev/null || true
 echo "Building..."
 docker build -t "${IMAGE}:latest" .
 echo "Pushing..."

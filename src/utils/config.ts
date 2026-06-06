@@ -125,7 +125,8 @@ async function loadConfigFromSecret(): Promise<AdsConfig> {
         ? payload
         : new TextDecoder().decode(payload as Uint8Array);
     return parseConfig(JSON.parse(text));
-  } catch {
+  } catch (err) {
+    process.stderr.write(`Warning: failed to load config from Secret Manager: ${err instanceof Error ? err.message : String(err)}. Using defaults.\n`);
     return FALLBACK_CONFIG;
   }
 }

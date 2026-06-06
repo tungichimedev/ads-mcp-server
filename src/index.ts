@@ -120,8 +120,9 @@ async function main(): Promise<void> {
   const port = process.env['PORT'];
   if (port) {
     // ── HTTP mode (Cloud Run / container) ──────────────────────────────────
-    const { createMcpExpressApp } = await import('@modelcontextprotocol/sdk/server/express.js');
-    const app = createMcpExpressApp({ host: '0.0.0.0' });
+    const express = (await import('express')).default;
+    const app = express();
+    app.use(express.json());
 
     app.get('/health', (_req, res) => {
       res.json({ status: 'ok' });
@@ -133,8 +134,13 @@ async function main(): Promise<void> {
       try {
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
-        res.on('close', () => { transport.close(); server.close(); });
+        res.on('close', async () => {
+          try { await transport.close(); } catch { /* cleanup best-effort */ }
+          try { await server.close(); } catch { /* cleanup best-effort */ }
+        });
       } catch (error) {
+        try { await transport.close(); } catch { /* cleanup best-effort */ }
+        try { await server.close(); } catch { /* cleanup best-effort */ }
         if (!res.headersSent) {
           res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
         }
