@@ -13,7 +13,8 @@ import {
   toMetaCampaign,
   fromMetaCampaign,
   centsToDollars,
-  dollarsToCents,
+  toMinorUnits,
+  fromMinorUnits,
   type MetaCampaign,
 } from './mapper.js';
 
@@ -195,16 +196,19 @@ export class MetaAdapter implements BaseAdapter {
 
     let fetchOptions: RequestInit;
 
-    if (method === 'GET') {
+    if (method === 'GET' || method === 'DELETE') {
+      // GET and DELETE: token + params go in the query string, no body. Sending a
+      // JSON body on a DELETE makes the Graph API misroute it and return a
+      // misleading "API version not supported" error.
       url.searchParams.set('access_token', token);
       if (queryParams) {
         for (const [k, v] of Object.entries(queryParams)) {
           url.searchParams.set(k, v);
         }
       }
-      fetchOptions = { method: 'GET' };
+      fetchOptions = { method };
     } else {
-      // POST or DELETE — token goes in the body
+      // POST — token goes in the body
       if (queryParams) {
         for (const [k, v] of Object.entries(queryParams)) {
           url.searchParams.set(k, v);
@@ -261,6 +265,11 @@ export class MetaAdapter implements BaseAdapter {
     return id.startsWith('act_') ? id.slice(4) : id;
   }
 
+  /** Account's ISO 4217 currency (from config), used to interpret Meta budget minor units. */
+  private accountCurrency(ctx: AdapterContext): string {
+    return (ctx.accountMeta['currency'] as string | undefined) ?? 'USD';
+  }
+
   // ─── Campaigns ──────────────────────────────────────────────────────────────
 
   async listCampaigns(
@@ -289,7 +298,8 @@ export class MetaAdapter implements BaseAdapter {
       params
     );
 
-    const data = resp.data.map(fromMetaCampaign);
+    const currency = this.accountCurrency(ctx);
+    const data = resp.data.map((c) => fromMetaCampaign(c, currency));
     const nextCursor = resp.paging?.cursors?.after;
 
     return {
@@ -314,7 +324,7 @@ export class MetaAdapter implements BaseAdapter {
         fields: 'id,name,status,objective,daily_budget,lifetime_budget,start_time,stop_time,created_time,updated_time',
       }
     );
-    return fromMetaCampaign(meta);
+    return fromMetaCampaign(meta, this.accountCurrency(ctx));
   }
 
   async createCampaign(
@@ -323,15 +333,31 @@ export class MetaAdapter implements BaseAdapter {
   ): Promise<UnifiedCampaign> {
     const actId = this.adAccountId(ctx);
     // input is expected to be a UnifiedCampaign-like object or toMetaCampaign payload
-    const payload = typeof input['name'] === 'string' && typeof input['objective'] === 'string'
+    const base = typeof input['name'] === 'string' && typeof input['objective'] === 'string'
       ? toMetaCampaign(input as unknown as UnifiedCampaign)
-      : input;
+      : { ...input };
+
+    // platform_options (special_ad_categories, bid_strategy, …) are not part of the
+    // unified campaign model, so toMetaCampaign drops them. Merge them back into the
+    // payload so they reach the Meta API, then strip the wrapper key itself.
+    const platformOptions =
+      (input['platform_options'] as Record<string, unknown> | undefined) ?? {};
+    const payload: Record<string, unknown> = {
+      ...(base as Record<string, unknown>),
+      ...platformOptions,
+    };
+    delete payload['platform_options'];
+
+    // Meta requires special_ad_categories on every campaign create; default to none.
+    if (payload['special_ad_categories'] === undefined) {
+      payload['special_ad_categories'] = [];
+    }
 
     const created = await this.fetch<{ id: string }>(
       `/act_${actId}/campaigns`,
       'POST',
       ctx.account,
-      payload as Record<string, unknown>
+      payload
     );
     return this.getCampaign(ctx, created.id);
   }
@@ -350,9 +376,10 @@ export class MetaAdapter implements BaseAdapter {
       payload['objective'] = toMetaObjective(updates['objective'] as Parameters<typeof toMetaObjective>[0]);
     }
     if (updates['budget'] !== undefined) {
-      const budget = updates['budget'] as { type: string; amount: number };
+      const budget = updates['budget'] as { type: string; amount: number; currency?: string };
       const budgetField = budget.type === 'daily' ? 'daily_budget' : 'lifetime_budget';
-      payload[budgetField] = String(dollarsToCents(budget.amount));
+      const currency = budget.currency ?? this.accountCurrency(ctx);
+      payload[budgetField] = String(toMinorUnits(budget.amount, currency));
       delete payload['budget'];
     }
 
@@ -850,12 +877,13 @@ export class MetaAdapter implements BaseAdapter {
       }
     );
 
+    const currency = this.accountCurrency(ctx);
     return resp.data.map((c) => {
       if (c.daily_budget && c.daily_budget !== '0') {
-        return centsToDollars(parseInt(c.daily_budget, 10));
+        return fromMinorUnits(parseInt(c.daily_budget, 10), currency);
       }
       if (c.lifetime_budget && c.lifetime_budget !== '0') {
-        return centsToDollars(parseInt(c.lifetime_budget, 10));
+        return fromMinorUnits(parseInt(c.lifetime_budget, 10), currency);
       }
       return 0;
     });

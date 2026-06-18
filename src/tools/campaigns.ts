@@ -36,21 +36,22 @@ async function runBudgetGuards(
   const budget = input['budget'];
   if (!budget || typeof budget !== 'object' || Array.isArray(budget)) return;
 
-  const budgetObj = budget as { type?: string; amount?: number };
+  const budgetObj = budget as { type?: string; amount?: number; currency?: string };
   const budgetType = budgetObj.type as 'daily' | 'lifetime' | undefined;
   const budgetAmount = budgetObj.amount;
+  const currency = budgetObj.currency ?? 'USD';
 
   if (!budgetType || budgetAmount === undefined) return;
 
-  // Per-campaign limit
-  checkCampaignBudget(budgetType, budgetAmount, ctx.config.safety);
+  // Per-campaign limit (safety caps are USD; the guard converts the amount).
+  checkCampaignBudget(budgetType, budgetAmount, ctx.config.safety, currency);
 
   // Account-level velocity check (daily budgets only)
   if (budgetType === 'daily') {
     const adapter = getAdapter(ctx, platform);
     const adapterCtx = buildAdapterCtx(ctx, platform, account);
     const existingBudgets = await adapter.getAllActiveCampaignBudgets(adapterCtx);
-    checkAccountVelocity(budgetAmount, existingBudgets, ctx.config.safety);
+    checkAccountVelocity(budgetAmount, existingBudgets, ctx.config.safety, currency);
   }
 }
 

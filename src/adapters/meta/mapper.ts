@@ -125,6 +125,33 @@ export function centsToDollars(cents: number): number {
   return cents / 100;
 }
 
+// Meta budget fields are expressed in the currency's *minor* unit. Most currencies
+// use 2 decimal places, but several use 0 (e.g. VND, JPY, KRW) or 3 (e.g. KWD, BHD).
+// Assuming 2 everywhere makes budgets 100x off for zero-decimal currencies.
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'PYG', 'RWF',
+  'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF',
+]);
+const THREE_DECIMAL_CURRENCIES = new Set(['BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND']);
+
+/** Number of decimal places in a currency's minor unit (defaults to 2). */
+export function minorUnitDigits(currency: string): number {
+  const c = currency.toUpperCase();
+  if (ZERO_DECIMAL_CURRENCIES.has(c)) return 0;
+  if (THREE_DECIMAL_CURRENCIES.has(c)) return 3;
+  return 2;
+}
+
+/** Convert a major-unit budget amount into the currency's minor unit (Meta API format). */
+export function toMinorUnits(amount: number, currency: string): number {
+  return Math.round(amount * 10 ** minorUnitDigits(currency));
+}
+
+/** Convert a minor-unit value from the Meta API back into major units. */
+export function fromMinorUnits(value: number, currency: string): number {
+  return value / 10 ** minorUnitDigits(currency);
+}
+
 // ─── Campaign Conversion ──────────────────────────────────────────────────────
 
 /**
@@ -155,7 +182,7 @@ export interface MetaCampaign {
  * - Objective and status are mapped to Meta enum values.
  */
 export function toMetaCampaign(unified: UnifiedCampaign): Record<string, unknown> {
-  const budgetCents = dollarsToCents(unified.budget.amount);
+  const budgetMinor = toMinorUnits(unified.budget.amount, unified.budget.currency);
   const budgetField =
     unified.budget.type === 'daily' ? 'daily_budget' : 'lifetime_budget';
 
@@ -163,7 +190,7 @@ export function toMetaCampaign(unified: UnifiedCampaign): Record<string, unknown
     name: unified.name,
     objective: toMetaObjective(unified.objective),
     status: toMetaStatus(unified.status),
-    [budgetField]: String(budgetCents),
+    [budgetField]: String(budgetMinor),
     ...(unified.schedule.start_date && { start_time: unified.schedule.start_date }),
     ...(unified.schedule.end_date && { stop_time: unified.schedule.end_date }),
   };
@@ -176,7 +203,7 @@ export function toMetaCampaign(unified: UnifiedCampaign): Record<string, unknown
  * - Objective and status are mapped to unified enum values.
  * - Raw Meta fields are preserved in platform_data.
  */
-export function fromMetaCampaign(meta: MetaCampaign): UnifiedCampaign {
+export function fromMetaCampaign(meta: MetaCampaign, accountCurrency = 'USD'): UnifiedCampaign {
   const hasDailyBudget = meta.daily_budget !== undefined && meta.daily_budget !== '0';
   const budgetType = hasDailyBudget ? 'daily' : 'lifetime';
   const rawBudget = hasDailyBudget
@@ -191,10 +218,10 @@ export function fromMetaCampaign(meta: MetaCampaign): UnifiedCampaign {
     objective: fromMetaObjective(meta.objective),
     budget: {
       type: budgetType,
-      amount: centsToDollars(rawBudget),
-      // Meta budgets are always in the account's currency; we store USD as default.
-      // The caller should override this with the account currency if available.
-      currency: 'USD',
+      // Meta returns budgets in the account currency's minor unit; convert using
+      // that currency's decimal places (callers pass the account currency).
+      amount: fromMinorUnits(rawBudget, accountCurrency),
+      currency: accountCurrency,
     },
     schedule: {
       start_date: meta.start_time?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
