@@ -241,16 +241,24 @@ export class MetaAdapter implements BaseAdapter {
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   private adAccountId(ctx: AdapterContext): string {
-    const id = ctx.accountMeta['ad_account_id'] as string | undefined;
+    // Canonical config field is `account_id` (see AccountMetaSchema in
+    // utils/config.ts). Fall back to the legacy `ad_account_id` key and then
+    // the account name for back-compat.
+    const id =
+      (ctx.accountMeta['account_id'] as string | undefined) ??
+      (ctx.accountMeta['ad_account_id'] as string | undefined) ??
+      (ctx.account as string | undefined);
     if (!id) {
       throw new AdsError(
         'ACCOUNT_ISSUE',
         'meta',
-        'ad_account_id missing from accountMeta',
+        'account_id missing from accountMeta',
         false
       );
     }
-    return id;
+    // Callers build URLs as `/act_${id}/...`, so return the bare id without
+    // the `act_` prefix (config may store it either way).
+    return id.startsWith('act_') ? id.slice(4) : id;
   }
 
   // ─── Campaigns ──────────────────────────────────────────────────────────────
