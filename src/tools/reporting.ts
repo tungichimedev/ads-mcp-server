@@ -22,6 +22,20 @@ function asStringArray(v: unknown): string[] {
   return [];
 }
 
+// Accept both the documented schema shape ({start, end}) and the internal
+// DateRange shape ({start_date, end_date}). Without this, {start, end} is
+// silently dropped, the Meta adapter serializes time_range as "{}" and the API
+// rejects it with "(#100) param time_range must be non-empty".
+function normalizeDateRange(v: unknown): DateRange {
+  const raw = asRecord(v);
+  const start = raw['start_date'] ?? raw['start'];
+  const end = raw['end_date'] ?? raw['end'];
+  return {
+    start_date: start == null ? '' : String(start),
+    end_date: end == null ? undefined : String(end),
+  } as DateRange;
+}
+
 // ---------------------------------------------------------------------------
 // Build AdapterContext
 // ---------------------------------------------------------------------------
@@ -74,7 +88,7 @@ export function reportingTools(ctx: ToolContext) {
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const entityType = str(args['entity_type']);
       const entityId = str(args['entity_id']);
-      const dateRange = asRecord(args['date_range']) as DateRange;
+      const dateRange = normalizeDateRange(args['date_range']);
       const granularity = str(args['granularity'] ?? 'day');
       const attributionWindow = args['attribution_window'] as
         | import('../models/platform.js').AttributionWindow
@@ -101,7 +115,7 @@ export function reportingTools(ctx: ToolContext) {
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const entityId = str(args['entity_id']);
       const breakdowns = asStringArray(args['breakdowns']);
-      const dateRange = asRecord(args['date_range']) as DateRange;
+      const dateRange = normalizeDateRange(args['date_range']);
 
       return ctx.rateLimiter.execute(platform, account, async () => {
         const adapter = getAdapter(ctx, platform);
@@ -119,7 +133,7 @@ export function reportingTools(ctx: ToolContext) {
       const entities = Array.isArray(args['entities'])
         ? (args['entities'] as Array<Record<string, unknown>>)
         : [];
-      const dateRange = asRecord(args['date_range']) as DateRange;
+      const dateRange = normalizeDateRange(args['date_range']);
       const granularity = str(args['granularity'] ?? 'total');
 
       const results = await Promise.all(
@@ -154,7 +168,7 @@ export function reportingTools(ctx: ToolContext) {
       const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
       const entityType = str(args['entity_type']);
       const entityId = str(args['entity_id']);
-      const dateRange = asRecord(args['date_range']) as DateRange;
+      const dateRange = normalizeDateRange(args['date_range']);
       const granularity = str(args['granularity'] ?? 'total');
       // compare_period: 'previous_period' (default) | 'previous_year' | number (days back)
       const comparePeriod = args['compare_period'] ?? 'previous_period';
