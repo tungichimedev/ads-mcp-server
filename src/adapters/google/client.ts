@@ -306,7 +306,6 @@ export class GoogleAdapter implements BaseAdapter {
   ): Promise<PaginatedResponse<UnifiedCampaign>> {
     let gaql = `
       SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
-             campaign.start_date, campaign.end_date,
              campaign_budget.amount_micros, campaign_budget.period
       FROM campaign
       WHERE campaign.status != 'REMOVED'
@@ -341,7 +340,6 @@ export class GoogleAdapter implements BaseAdapter {
   async getCampaign(ctx: AdapterContext, campaignId: string): Promise<UnifiedCampaign> {
     const gaql = `
       SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
-             campaign.start_date, campaign.end_date,
              campaign_budget.amount_micros, campaign_budget.period
       FROM campaign
       WHERE campaign.id = ${safeId(campaignId)}
@@ -497,7 +495,7 @@ export class GoogleAdapter implements BaseAdapter {
       SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.campaign,
              ad_group.type, ad_group.cpc_bid_micros, ad_group.target_cpa_micros
       FROM ad_group
-      WHERE ad_group.campaign.id = ${safeId(campaignId)}
+      WHERE campaign.id = ${safeId(campaignId)}
         AND ad_group.status != 'REMOVED'
       LIMIT ${limit}
     `;

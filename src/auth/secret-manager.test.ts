@@ -36,7 +36,7 @@ describe('SecretManagerKeychainProvider', () => {
     const result = await provider.getPassword('ads-mcp', 'meta:my-account');
     expect(result).toBe('my-token');
     expect(mockClient.accessSecretVersion).toHaveBeenCalledWith({
-      name: 'projects/-/secrets/meta--my-account/versions/latest',
+      name: 'projects/test-project/secrets/meta--my-account/versions/latest',
     });
   });
 
@@ -55,7 +55,7 @@ describe('SecretManagerKeychainProvider', () => {
     mockClient.addSecretVersion.mockResolvedValue([{}]);
     await provider.setPassword('ads-mcp', 'meta:my-account', 'new-token');
     expect(mockClient.addSecretVersion).toHaveBeenCalledWith({
-      parent: 'projects/-/secrets/meta--my-account',
+      parent: 'projects/test-project/secrets/meta--my-account',
       payload: { data: Buffer.from('new-token') },
     });
   });
