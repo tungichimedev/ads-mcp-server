@@ -5,3 +5,9 @@ dist/
 npm-debug.log*
 .DS_Store
 coverage/
+
+# ads-mcp operational build state (transient; contains live resource IDs)
+_bytex_*_state.json
+_bytex_*_assetmap.json
+# downloaded ad creatives — large binaries, reproducible via _stampscan_assets.mjs
+docs/stampscan-creatives/images/
