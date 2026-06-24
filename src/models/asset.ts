@@ -107,8 +107,10 @@ export function mapAdAsset(row: unknown): AdAsset {
     asset_type: normalizeAssetType(asset['type']),
     field_type: normalizeFieldType(view['field_type']),
     name: String(asset['name'] ?? ''),
+    // Per-asset policy lives on the asset resource (asset.policy_summary),
+    // NOT on ad_group_ad_asset_view (which has no policy_summary in v24).
     approval_status: normalizeApprovalStatus(
-      (view['policy_summary'] as Record<string, unknown> | undefined)?.['approval_status'],
+      (asset['policy_summary'] as Record<string, unknown> | undefined)?.['approval_status'],
     ),
     content: extractAssetContent(asset),
     campaign_id: String(campaign['id'] ?? ''),

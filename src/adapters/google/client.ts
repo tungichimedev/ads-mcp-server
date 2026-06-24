@@ -90,6 +90,35 @@ interface GoogleSearchTerm {
   campaign: { id: string };
 }
 
+// ─── Error extraction ───────────────────────────────────────────────────────
+
+/**
+ * google-ads-api throws a GoogleAdsFailure-shaped object carrying an `errors`
+ * array (each `{ error_code, message }`) rather than a standard Error with a
+ * string `.message`. A naive `String(err)` yields "[object Object]", so pull
+ * out the human-readable messages here.
+ */
+export function extractGoogleErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    const errors = e['errors'];
+    if (Array.isArray(errors) && errors.length) {
+      const msgs = errors
+        .map((x) => (x && typeof x === 'object' ? (x as Record<string, unknown>)['message'] : undefined))
+        .filter((m): m is string => typeof m === 'string' && m.length > 0);
+      if (msgs.length) return msgs.join('; ');
+    }
+    if (typeof e['message'] === 'string' && e['message']) return e['message'] as string;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(err);
+}
+
 // ─── GAQL safety ──────────────────────────────────────────────────────────
 
 /** Validates that an ID is safe for GAQL interpolation (digits only) and returns it. */
@@ -285,7 +314,7 @@ export class GoogleAdapter implements BaseAdapter {
   }
 
   private handleError(err: unknown): never {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = extractGoogleErrorMessage(err);
     const upper = message.toUpperCase();
 
     if (upper.includes('RATE_EXCEEDED') || upper.includes('RESOURCE_EXHAUSTED')) {
@@ -1411,10 +1440,10 @@ export class GoogleAdapter implements BaseAdapter {
       if (scope.campaignId) assetWhere.push(`campaign.id = ${safeId(scope.campaignId)}`);
       const assetGaql = `
         SELECT asset.id, asset.name, asset.type,
+               asset.policy_summary.approval_status,
+               asset.policy_summary.review_status,
+               asset.policy_summary.policy_topic_entries,
                ad_group_ad_asset_view.field_type,
-               ad_group_ad_asset_view.policy_summary.approval_status,
-               ad_group_ad_asset_view.policy_summary.review_status,
-               ad_group_ad_asset_view.policy_summary.policy_topic_entries,
                ad_group.id, ad_group.name, campaign.id, campaign.name
         FROM ad_group_ad_asset_view
         ${assetWhere.length ? `WHERE ${assetWhere.join(' AND ')}` : ''}
@@ -1452,7 +1481,8 @@ export class GoogleAdapter implements BaseAdapter {
   private mapAssetPolicy(row: any): AssetPolicy {
     const view = row?.ad_group_ad_asset_view ?? {};
     const asset = row?.asset ?? {};
-    const summary = buildPolicySummary(view.policy_summary);
+    // Per-asset policy is on asset.policy_summary (ad_group_ad_asset_view has none).
+    const summary = buildPolicySummary(asset.policy_summary);
     return {
       level: 'asset',
       platform: 'google',
@@ -1485,8 +1515,8 @@ export class GoogleAdapter implements BaseAdapter {
              asset.image_asset.full_size.height_pixels,
              asset.youtube_video_asset.youtube_video_id,
              asset.youtube_video_asset.youtube_video_title,
+             asset.policy_summary.approval_status,
              ad_group_ad_asset_view.field_type,
-             ad_group_ad_asset_view.policy_summary.approval_status,
              ad_group.id, ad_group.name, campaign.id, campaign.name
       FROM ad_group_ad_asset_view
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
