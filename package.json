@@ -4,6 +4,9 @@
   "description": "MCP server for managing ads across Meta, Google, and TikTok",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "ads-mcp": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
