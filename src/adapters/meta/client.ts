@@ -1086,6 +1086,10 @@ export class MetaAdapter implements BaseAdapter {
     throw new AdsError('ACCOUNT_ISSUE', 'meta', 'Policy tools are only available for Google Ads', false);
   }
 
+  async listAdAssets(): Promise<never> {
+    throw new AdsError('ACCOUNT_ISSUE', 'meta', 'Asset inspection is only available for Google Ads', false);
+  }
+
   // ─── Account ──────────────────────────────────────────────────────────
 
   async getAccountHealth(ctx: AdapterContext): Promise<Record<string, unknown>> {

@@ -8,6 +8,8 @@ import { AdsError } from '../../utils/errors.js';
 import type { UnifiedKeyword, UnifiedSearchTerm, KeywordMutationResult } from '../../models/keyword.js';
 import type { AdPolicy, AssetPolicy, PolicyIssue } from '../../models/policy.js';
 import { buildPolicySummary, isApproved } from '../../models/policy.js';
+import type { AdAsset } from '../../models/asset.js';
+import { mapAdAsset } from '../../models/asset.js';
 import {
   toGoogleCampaignType,
   fromGoogleCampaign,
@@ -1463,6 +1465,35 @@ export class GoogleAdapter implements BaseAdapter {
       campaign_name: String(row?.campaign?.name ?? ''),
       ...summary,
     };
+  }
+
+  async listAdAssets(
+    ctx: AdapterContext,
+    scope: { campaignId?: string; adGroupId?: string },
+    limit: number
+  ): Promise<AdAsset[]> {
+    const cap = limit > 0 ? limit : 200;
+    const where: string[] = [];
+    if (scope.adGroupId) where.push(`ad_group.id = ${safeId(scope.adGroupId)}`);
+    if (scope.campaignId) where.push(`campaign.id = ${safeId(scope.campaignId)}`);
+
+    const gaql = `
+      SELECT asset.id, asset.name, asset.type,
+             asset.text_asset.text,
+             asset.image_asset.full_size.url,
+             asset.image_asset.full_size.width_pixels,
+             asset.image_asset.full_size.height_pixels,
+             asset.youtube_video_asset.youtube_video_id,
+             asset.youtube_video_asset.youtube_video_title,
+             ad_group_ad_asset_view.field_type,
+             ad_group_ad_asset_view.policy_summary.approval_status,
+             ad_group.id, ad_group.name, campaign.id, campaign.name
+      FROM ad_group_ad_asset_view
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      LIMIT ${cap}
+    `;
+    const rows = await this.query(ctx, gaql);
+    return rows.map((r) => mapAdAsset(r));
   }
 
   // ─── Account ──────────────────────────────────────────────────────────────
