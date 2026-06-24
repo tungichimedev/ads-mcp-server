@@ -8,6 +8,7 @@ import {
   getDefaultAccount,
   getAccountMeta,
   DEFAULT_SAFETY_CONFIG,
+  saveConfig,
 } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -220,5 +221,37 @@ describe('getAccountMeta', () => {
   it('returns undefined for an unknown platform', () => {
     const config = parseConfig(raw);
     expect(getAccountMeta(config, 'tiktok', 'acct-a')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// saveConfig
+// ---------------------------------------------------------------------------
+
+describe('saveConfig', () => {
+  it('round-trips through loadConfig', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ads-mcp-save-'));
+    try {
+      const original = parseConfig({
+        schema_version: 1,
+        platforms: {
+          tiktok: {
+            default_account: 'themepack',
+            accounts: {
+              themepack: { account_id: '123', advertiser_id: '123', currency: 'USD', label: 'ThemePack' },
+            },
+          },
+        },
+      });
+
+      await saveConfig(dir, original);
+      const reloaded = await loadConfig(dir);
+
+      expect(reloaded.platforms?.tiktok?.accounts?.themepack?.advertiser_id).toBe('123');
+      expect(reloaded.platforms?.tiktok?.default_account).toBe('themepack');
+      expect(reloaded.schema_version).toBe(1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
