@@ -1,0 +1,78 @@
+import { vi } from 'vitest';
+import { buildAuthorizeUrl, exchangeAuthCode } from './tiktok-oauth.js';
+
+describe('buildAuthorizeUrl', () => {
+  it('includes app_id, state, and redirect_uri', () => {
+    const url = buildAuthorizeUrl('app123', 'nonce456', 'https://example.com/cb');
+    expect(url).toContain('https://business-api.tiktok.com/portal/auth?');
+    expect(url).toContain('app_id=app123');
+    expect(url).toContain('state=nonce456');
+    expect(url).toContain('redirect_uri=https%3A%2F%2Fexample.com%2Fcb');
+  });
+});
+
+describe('exchangeAuthCode', () => {
+  it('posts credentials and returns parsed token + advertiser ids + expiresAt', async () => {
+    const before = Date.now();
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      message: 'OK',
+      data: { access_token: 'tok_new', scope: [4, 5], advertiser_ids: ['111', '222'], access_token_expire_in: 86400 },
+    }), { status: 200 })) as unknown as typeof globalThis.fetch;
+
+    const result = await exchangeAuthCode(fetchFn, 'app123', 'secretXYZ', 'authABC');
+
+    expect(result.accessToken).toBe('tok_new');
+    expect(result.advertiserIds).toEqual(['111', '222']);
+    expect(result.scope).toEqual([4, 5]);
+    // expiresAt should be a valid ISO string in the future (roughly now + 86400s)
+    expect(typeof result.expiresAt).toBe('string');
+    const expiresAtMs = new Date(result.expiresAt).getTime();
+    expect(expiresAtMs).toBeGreaterThan(before);
+    expect(expiresAtMs).toBeLessThanOrEqual(before + 86400 * 1000 + 5000); // within 5s tolerance
+
+    const call = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toBe('https://business-api.tiktok.com/open_api/v1.3/oauth2/access_token/');
+    const body = JSON.parse((call[1] as RequestInit).body as string);
+    expect(body).toEqual({ app_id: 'app123', secret: 'secretXYZ', auth_code: 'authABC' });
+  });
+
+  it('falls back to 365-day expiry when access_token_expire_in is absent', async () => {
+    const before = Date.now();
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      message: 'OK',
+      data: { access_token: 'tok_new', scope: [], advertiser_ids: [] },
+    }), { status: 200 })) as unknown as typeof globalThis.fetch;
+
+    const result = await exchangeAuthCode(fetchFn, 'app123', 'secretXYZ', 'authABC');
+
+    expect(typeof result.expiresAt).toBe('string');
+    const expiresAtMs = new Date(result.expiresAt).getTime();
+    expect(expiresAtMs).toBeGreaterThan(before);
+    // Should be approximately 365 days from now (within 5s tolerance)
+    const expectedMs = before + 365 * 24 * 60 * 60 * 1000;
+    expect(expiresAtMs).toBeGreaterThanOrEqual(expectedMs - 5000);
+    expect(expiresAtMs).toBeLessThanOrEqual(expectedMs + 5000);
+  });
+
+  it('throws with the TikTok message when code is non-zero', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+      code: 40105, message: 'Auth code is invalid or expired', data: {},
+    }), { status: 200 })) as unknown as typeof globalThis.fetch;
+
+    await expect(exchangeAuthCode(fetchFn, 'a', 's', 'bad'))
+      .rejects.toThrow(/Auth code is invalid or expired/);
+  });
+
+  it('throws with malformed-token-response error when code is 0 but no access_token', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      message: 'OK',
+      data: {},
+    }), { status: 200 })) as unknown as typeof globalThis.fetch;
+
+    await expect(exchangeAuthCode(fetchFn, 'app123', 'secret', 'auth'))
+      .rejects.toThrow(/no access_token/);
+  });
+});

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -170,6 +170,15 @@ export async function loadConfig(basePath: string): Promise<AdsConfig> {
   }
 
   return parseConfig(raw);
+}
+
+/**
+ * Writes the config to `<basePath>/config.json` as pretty-printed JSON.
+ * Local-only — not supported on Cloud Run (Secret Manager is read-only here).
+ */
+export async function saveConfig(basePath: string, config: AdsConfig): Promise<void> {
+  const configPath = join(basePath, 'config.json');
+  await writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
 // ---------------------------------------------------------------------------
