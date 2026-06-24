@@ -36,6 +36,7 @@ import { budgetTools, BUDGET_TOOL_DEFINITIONS } from './tools/budgets.js';
 import { ruleTools, RULE_TOOL_DEFINITIONS } from './tools/rules.js';
 import { trackingTools, TRACKING_TOOL_DEFINITIONS } from './tools/tracking.js';
 import { keywordTools, KEYWORD_TOOL_DEFINITIONS } from './tools/keywords.js';
+import { policyTools, POLICY_TOOL_DEFINITIONS } from './tools/policy.js';
 import { accountTools, ACCOUNT_TOOL_DEFINITIONS } from './tools/accounts.js';
 import { systemTools, SYSTEM_TOOL_DEFINITIONS } from './tools/system.js';
 
@@ -233,6 +234,7 @@ function createServer(ctx: ToolContext): Server {
     ...ruleTools(ctx),
     ...trackingTools(ctx),
     ...keywordTools(ctx),
+    ...policyTools(ctx),
     ...accountTools(ctx),
     ...systemTools(ctx),
   };
@@ -248,6 +250,7 @@ function createServer(ctx: ToolContext): Server {
     ...RULE_TOOL_DEFINITIONS,
     ...TRACKING_TOOL_DEFINITIONS,
     ...KEYWORD_TOOL_DEFINITIONS,
+    ...POLICY_TOOL_DEFINITIONS,
     ...ACCOUNT_TOOL_DEFINITIONS,
     ...SYSTEM_TOOL_DEFINITIONS,
   ];

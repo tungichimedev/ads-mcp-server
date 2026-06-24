@@ -1076,6 +1076,16 @@ export class MetaAdapter implements BaseAdapter {
     throw new AdsError('ACCOUNT_ISSUE', 'meta', 'Keyword tools are only available for Google Ads', false);
   }
 
+  // ─── Policy (not yet supported on Meta — Google Ads only) ──────────────
+
+  async getAdPolicy(): Promise<never> {
+    throw new AdsError('ACCOUNT_ISSUE', 'meta', 'Policy tools are only available for Google Ads', false);
+  }
+
+  async getPolicyIssues(): Promise<never> {
+    throw new AdsError('ACCOUNT_ISSUE', 'meta', 'Policy tools are only available for Google Ads', false);
+  }
+
   // ─── Account ──────────────────────────────────────────────────────────
 
   async getAccountHealth(ctx: AdapterContext): Promise<Record<string, unknown>> {
