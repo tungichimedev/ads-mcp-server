@@ -39,4 +39,15 @@ describe('exchangeAuthCode', () => {
     await expect(exchangeAuthCode(fetchFn, 'a', 's', 'bad'))
       .rejects.toThrow(/Auth code is invalid or expired/);
   });
+
+  it('throws with malformed-token-response error when code is 0 but no access_token', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      message: 'OK',
+      data: {},
+    }), { status: 200 })) as unknown as typeof globalThis.fetch;
+
+    await expect(exchangeAuthCode(fetchFn, 'app123', 'secret', 'auth'))
+      .rejects.toThrow(/no access_token/);
+  });
 });

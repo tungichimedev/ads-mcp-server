@@ -45,8 +45,11 @@ export async function exchangeAuthCode(
 
   const parsed = ExchangeResponseSchema.parse(await res.json());
 
-  if (parsed.code !== 0 || !parsed.data?.access_token) {
+  if (parsed.code !== 0) {
     throw new Error(`TikTok token exchange failed (code ${parsed.code}): ${parsed.message}`);
+  }
+  if (!parsed.data?.access_token) {
+    throw new Error('TikTok token exchange returned no access_token (unexpected response shape).');
   }
 
   return {
