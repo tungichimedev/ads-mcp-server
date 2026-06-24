@@ -62,8 +62,9 @@ describe('mapAdAsset', () => {
         name: 'Hero',
         type: 4,
         image_asset: { full_size: { url: 'https://img/hero.png', width_pixels: 1200, height_pixels: 1200 } },
+        policy_summary: { approval_status: 3 },
       },
-      ad_group_ad_asset_view: { field_type: 20, policy_summary: { approval_status: 3 } },
+      ad_group_ad_asset_view: { field_type: 20 },
       ad_group: { id: '22', name: 'Ad group 1' },
       campaign: { id: '33', name: 'Stampscan_CPI_US' },
     };
