@@ -59,7 +59,7 @@ export async function runTikTokSetup(deps: TikTokSetupDeps, opts: TikTokSetupOpt
   if (!authCode) throw new Error('auth_code is required.');
 
   // 4. Exchange
-  const { accessToken, advertiserIds } = await exchangeAuthCode(fetchFn, appId, appSecret, authCode);
+  const { accessToken, advertiserIds, expiresAt } = await exchangeAuthCode(fetchFn, appId, appSecret, authCode);
   log(`\nExchange OK. Granted ${advertiserIds.length} advertiser(s).`);
 
   // 5. Map to configured accounts
@@ -87,6 +87,7 @@ export async function runTikTokSetup(deps: TikTokSetupDeps, opts: TikTokSetupOpt
   // 7. Store tokens (config written only after ALL keychain writes succeed)
   for (const m of matched) {
     await deps.setSecret(`tiktok:${m.accountName}`, accessToken);
+    await deps.setSecret(`tiktok:${m.accountName}:expires`, expiresAt);
     log(`Stored token: tiktok:${m.accountName}`);
   }
 

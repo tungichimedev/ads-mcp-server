@@ -7,6 +7,7 @@ export interface TokenExchangeResult {
   accessToken: string;
   scope: (string | number)[];
   advertiserIds: string[];
+  expiresAt: string;
 }
 
 const ExchangeResponseSchema = z.object({
@@ -17,6 +18,7 @@ const ExchangeResponseSchema = z.object({
       access_token: z.string().optional(),
       scope: z.array(z.union([z.string(), z.number()])).optional(),
       advertiser_ids: z.array(z.string()).optional(),
+      access_token_expire_in: z.number().optional(),
     })
     .optional(),
 });
@@ -52,9 +54,16 @@ export async function exchangeAuthCode(
     throw new Error('TikTok token exchange returned no access_token (unexpected response shape).');
   }
 
+  const expireIn = parsed.data.access_token_expire_in;
+  const expiresAt =
+    expireIn && expireIn > 0
+      ? new Date(Date.now() + expireIn * 1000).toISOString()
+      : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+
   return {
     accessToken: parsed.data.access_token,
     scope: parsed.data.scope ?? [],
     advertiserIds: parsed.data.advertiser_ids ?? [],
+    expiresAt,
   };
 }
