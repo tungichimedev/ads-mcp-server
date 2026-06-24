@@ -1149,6 +1149,10 @@ export class TikTokAdapter implements BaseAdapter {
     throw new AdsError('ACCOUNT_ISSUE', 'tiktok', 'Policy tools are only available for Google Ads', false);
   }
 
+  async listAdAssets(): Promise<never> {
+    throw new AdsError('ACCOUNT_ISSUE', 'tiktok', 'Asset inspection is only available for Google Ads', false);
+  }
+
   // ─── Account ──────────────────────────────────────────────────────────────────
 
   async getAccountHealth(ctx: AdapterContext): Promise<Record<string, unknown>> {

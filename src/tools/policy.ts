@@ -82,6 +82,27 @@ export function policyTools(ctx: ToolContext) {
         };
       });
     },
+
+    // ─── list_ad_assets ──────────────────────────────────────────────────────
+
+    async list_ad_assets(args: Record<string, unknown>): Promise<unknown> {
+      const platform = str(args['platform']);
+      assertGoogle(platform);
+      const account = resolveAccount(ctx, platform, args['account'] as string | undefined);
+
+      const scope = {
+        campaignId: args['campaign_id'] ? str(args['campaign_id']) : undefined,
+        adGroupId: args['ad_group_id'] ? str(args['ad_group_id']) : undefined,
+      };
+      const limit = typeof args['limit'] === 'number' ? (args['limit'] as number) : 200;
+
+      return ctx.rateLimiter.execute(platform, account, async () => {
+        const adapter = getAdapter(ctx, platform);
+        const adapterCtx = buildAdapterCtx(ctx, platform, account);
+        const assets = await adapter.listAdAssets(adapterCtx, scope, limit);
+        return { scope, count: assets.length, assets };
+      });
+    },
   };
 }
 
@@ -124,6 +145,22 @@ export const POLICY_TOOL_DEFINITIONS = [
           description: 'Include fully-approved ads/assets too. Default false (issues only).',
         },
         limit: { type: 'number', description: 'Max rows per level (default 200)' },
+      },
+      required: ['platform'],
+    },
+  },
+  {
+    name: 'list_ad_assets',
+    description:
+      'List the creative assets (images with URLs, YouTube videos, headlines, descriptions) attached to ads in a campaign or ad group, with per-asset policy approval status. Use to inspect the actual creative — e.g. to find which asset triggered a policy flag. Google Ads only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        platform: { type: 'string', description: 'Must be "google"' },
+        account: { type: 'string', description: 'Account name (optional if default configured)' },
+        campaign_id: { type: 'string', description: 'Limit to this campaign (optional)' },
+        ad_group_id: { type: 'string', description: 'Limit to this ad group (optional)' },
+        limit: { type: 'number', description: 'Max assets (default 200)' },
       },
       required: ['platform'],
     },

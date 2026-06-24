@@ -5,6 +5,7 @@ import type { UnifiedAd } from '../models/ad.js';
 import type { DateRange, AttributionWindow } from '../models/platform.js';
 import type { UnifiedKeyword, UnifiedSearchTerm, KeywordMutationResult } from '../models/keyword.js';
 import type { AdPolicy, PolicyIssue } from '../models/policy.js';
+import type { AdAsset } from '../models/asset.js';
 
 export interface AdapterContext {
   account: string;
@@ -250,6 +251,17 @@ export interface BaseAdapter {
     scope: { campaignId?: string; adGroupId?: string },
     options: { includeAssets: boolean; includeApproved: boolean; limit: number }
   ): Promise<PolicyIssue[]>;
+
+  /**
+   * List the creative assets (images, videos, text) attached to ads in a
+   * campaign or ad group, with their content URLs and per-asset approval
+   * status — so the caller can inspect the actual creative.
+   */
+  listAdAssets(
+    ctx: AdapterContext,
+    scope: { campaignId?: string; adGroupId?: string },
+    limit: number
+  ): Promise<AdAsset[]>;
 
   // ─── Account ─────────────────────────────────────────────────────────────────
 
