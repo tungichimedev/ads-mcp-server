@@ -71,7 +71,7 @@ docker push "${IMAGE}:latest"
 echo "7/8 Deploying to Cloud Run..."
 gcloud run deploy "${SERVICE_NAME}" \
   --image="${IMAGE}:latest" --region="${REGION}" --platform=managed \
-  --port=8080 --memory=256Mi --cpu=1 --timeout=300 --concurrency=10 \
+  --port=8080 --memory=1Gi --cpu=2 --timeout=300 --concurrency=10 \
   --min-instances=0 --max-instances=1 --no-allow-unauthenticated --quiet
 
 SA=$(gcloud run services describe "${SERVICE_NAME}" --region="${REGION}" --format='value(spec.template.spec.serviceAccountName)')

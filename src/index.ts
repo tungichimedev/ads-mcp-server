@@ -36,6 +36,7 @@ import { budgetTools, BUDGET_TOOL_DEFINITIONS } from './tools/budgets.js';
 import { ruleTools, RULE_TOOL_DEFINITIONS } from './tools/rules.js';
 import { trackingTools, TRACKING_TOOL_DEFINITIONS } from './tools/tracking.js';
 import { keywordTools, KEYWORD_TOOL_DEFINITIONS } from './tools/keywords.js';
+import { policyTools, POLICY_TOOL_DEFINITIONS } from './tools/policy.js';
 import { accountTools, ACCOUNT_TOOL_DEFINITIONS } from './tools/accounts.js';
 import { systemTools, SYSTEM_TOOL_DEFINITIONS } from './tools/system.js';
 
@@ -86,10 +87,65 @@ async function main(): Promise<void> {
 
   const googleConfig = config.platforms?.['google'];
   if (googleConfig && googleConfig.accounts && Object.keys(googleConfig.accounts).length > 0) {
-    adapters.set('google', new GoogleAdapter(async (_account) => {
-      // Client creation deferred to runtime — google-ads-node will be configured
-      // with credentials from keychain when actually called
-      return {}; // Placeholder — actual client init happens in adapter
+    // Shared OAuth credentials (one app + MCC + refresh token serves all
+    // accounts) are read once from the keychain under `google:_shared:*`.
+    // Per-account customer ids come from config (accountMeta).
+    const kc = getKeychainProvider();
+    type GoogleCreds = {
+      developer_token: string;
+      client_id: string;
+      client_secret: string;
+      refresh_token: string;
+      login_customer_id?: string;
+    };
+    let googleCredsPromise: Promise<GoogleCreds> | undefined;
+    const loadGoogleCreds = async (): Promise<GoogleCreds> => {
+      const g = async (f: string): Promise<string> =>
+        (await kc.getPassword('ads-mcp', `google:_shared:${f}`)) ?? '';
+      const [developer_token, client_id, client_secret, refresh_token, login_customer_id] =
+        await Promise.all([
+          g('developer_token'),
+          g('client_id'),
+          g('client_secret'),
+          g('refresh_token'),
+          g('login_customer_id'),
+        ]);
+      const missing = Object.entries({ developer_token, client_id, client_secret, refresh_token })
+        .filter(([, v]) => !v)
+        .map(([k]) => k);
+      if (missing.length > 0) {
+        throw new AdsError(
+          'ACCOUNT_ISSUE',
+          'google',
+          `Google Ads credentials missing from keychain: ${missing.join(', ')}. Run ./scripts/setup-local-google.sh`,
+          false,
+        );
+      }
+      return { developer_token, client_id, client_secret, refresh_token, login_customer_id: login_customer_id || undefined };
+    };
+
+    const customerCache = new Map<string, unknown>();
+    adapters.set('google', new GoogleAdapter(async (account) => {
+      if (customerCache.has(account)) return customerCache.get(account);
+      googleCredsPromise ??= loadGoogleCreds();
+      const creds = await googleCredsPromise;
+      const meta = config.platforms?.['google']?.accounts?.[account];
+      const rawCustomerId = (meta?.customer_id ?? meta?.account_id ?? account) as string;
+      const customer_id = String(rawCustomerId).replace(/-/g, '');
+      const login_customer_id = String(meta?.login_customer_id ?? creds.login_customer_id ?? '').replace(/-/g, '') || undefined;
+      const { GoogleAdsApi } = await import('google-ads-api');
+      const api = new GoogleAdsApi({
+        client_id: creds.client_id,
+        client_secret: creds.client_secret,
+        developer_token: creds.developer_token,
+      });
+      const customer = api.Customer({
+        customer_id,
+        refresh_token: creds.refresh_token,
+        ...(login_customer_id ? { login_customer_id } : {}),
+      });
+      customerCache.set(account, customer);
+      return customer;
     }));
   }
 
@@ -178,6 +234,7 @@ function createServer(ctx: ToolContext): Server {
     ...ruleTools(ctx),
     ...trackingTools(ctx),
     ...keywordTools(ctx),
+    ...policyTools(ctx),
     ...accountTools(ctx),
     ...systemTools(ctx),
   };
@@ -193,6 +250,7 @@ function createServer(ctx: ToolContext): Server {
     ...RULE_TOOL_DEFINITIONS,
     ...TRACKING_TOOL_DEFINITIONS,
     ...KEYWORD_TOOL_DEFINITIONS,
+    ...POLICY_TOOL_DEFINITIONS,
     ...ACCOUNT_TOOL_DEFINITIONS,
     ...SYSTEM_TOOL_DEFINITIONS,
   ];

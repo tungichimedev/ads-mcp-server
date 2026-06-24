@@ -4,6 +4,7 @@ import type { UnifiedAdSet } from '../models/adset.js';
 import type { UnifiedAd } from '../models/ad.js';
 import type { DateRange, AttributionWindow } from '../models/platform.js';
 import type { UnifiedKeyword, UnifiedSearchTerm, KeywordMutationResult } from '../models/keyword.js';
+import type { AdPolicy, PolicyIssue } from '../models/policy.js';
 
 export interface AdapterContext {
   account: string;
@@ -233,6 +234,22 @@ export interface BaseAdapter {
     adGroupId: string,
     dateRange: DateRange
   ): Promise<UnifiedSearchTerm[]>;
+
+  // ─── Policy / Ad Review ──────────────────────────────────────────────────────
+
+  /** Policy/approval summary for a single ad (ad-level). */
+  getAdPolicy(ctx: AdapterContext, adId: string): Promise<AdPolicy>;
+
+  /**
+   * Scan a campaign, ad group, or the whole account for ads and assets whose
+   * policy approval is anything other than fully APPROVED, returning the
+   * specific policy topics so the caller knows why each is limited/disapproved.
+   */
+  getPolicyIssues(
+    ctx: AdapterContext,
+    scope: { campaignId?: string; adGroupId?: string },
+    options: { includeAssets: boolean; includeApproved: boolean; limit: number }
+  ): Promise<PolicyIssue[]>;
 
   // ─── Account ─────────────────────────────────────────────────────────────────
 

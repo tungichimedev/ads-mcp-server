@@ -131,12 +131,16 @@ export class TikTokAdapter implements BaseAdapter {
   // ─── Private helpers ────────────────────────────────────────────────────────
 
   private advertiserId(ctx: AdapterContext): string {
-    const id = ctx.accountMeta['advertiser_id'] as string | undefined;
+    // Prefer an explicit `advertiser_id`, falling back to `account_id` so
+    // TikTok accounts can be configured like every other platform.
+    const id =
+      (ctx.accountMeta['advertiser_id'] as string | undefined) ??
+      (ctx.accountMeta['account_id'] as string | undefined);
     if (!id) {
       throw new AdsError(
         'ACCOUNT_ISSUE',
         'tiktok',
-        'advertiser_id missing from accountMeta',
+        'advertiser_id (or account_id) missing from accountMeta',
         false
       );
     }
@@ -1133,6 +1137,16 @@ export class TikTokAdapter implements BaseAdapter {
 
   async getSearchTerms(): Promise<never> {
     throw new AdsError('ACCOUNT_ISSUE', 'tiktok', 'Keyword tools are only available for Google Ads', false);
+  }
+
+  // ─── Policy (not yet supported on TikTok — Google Ads only) ────────────────────
+
+  async getAdPolicy(): Promise<never> {
+    throw new AdsError('ACCOUNT_ISSUE', 'tiktok', 'Policy tools are only available for Google Ads', false);
+  }
+
+  async getPolicyIssues(): Promise<never> {
+    throw new AdsError('ACCOUNT_ISSUE', 'tiktok', 'Policy tools are only available for Google Ads', false);
   }
 
   // ─── Account ──────────────────────────────────────────────────────────────────

@@ -25,8 +25,10 @@ export class SecretManagerKeychainProvider implements KeychainProvider {
   async getPassword(_service: string, account: string): Promise<string | null> {
     const secretName = toSecretName(account);
     try {
+      // Explicit project id — `projects/-` fails with PERMISSION_DENIED (no quota project).
+      const projectId = await this.client.getProjectId();
       const [version] = await this.client.accessSecretVersion({
-        name: `projects/-/secrets/${secretName}/versions/latest`,
+        name: `projects/${projectId}/secrets/${secretName}/versions/latest`,
       });
       return version.payload?.data?.toString() ?? null;
     } catch (err: any) {
@@ -40,7 +42,7 @@ export class SecretManagerKeychainProvider implements KeychainProvider {
     const projectId = await this.client.getProjectId();
     try {
       await this.client.addSecretVersion({
-        parent: `projects/-/secrets/${secretName}`,
+        parent: `projects/${projectId}/secrets/${secretName}`,
         payload: { data: Buffer.from(password) },
       });
     } catch (err: any) {

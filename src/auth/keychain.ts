@@ -17,17 +17,21 @@ let provider: KeychainProvider | null = null;
  */
 export async function initKeychain(): Promise<void> {
   if (process.env['K_SERVICE']) {
-    const { SecretManagerServiceClient } = await import('@google-cloud/secret-manager');
+    // `as string` skips tsc module resolution — this is an optional dep only
+    // present on Cloud Run (installed at deploy time, omitted from the image build).
+    const { SecretManagerServiceClient } = await import('@google-cloud/secret-manager' as string);
     const { SecretManagerKeychainProvider } = await import('./secret-manager.js');
     const client = new SecretManagerServiceClient();
     provider = new SecretManagerKeychainProvider(client);
     return;
   }
 
-  const keytar = await import('keytar');
+  // `as string` skips tsc module resolution — keytar is an optional dep,
+  // omitted from the production image (Cloud Run uses Secret Manager instead).
+  const keytar = await import('keytar' as string);
   provider = {
-    getPassword: (service, account) => keytar.default.getPassword(service, account),
-    setPassword: (service, account, password) =>
+    getPassword: (service: string, account: string) => keytar.default.getPassword(service, account),
+    setPassword: (service: string, account: string, password: string) =>
       keytar.default.setPassword(service, account, password),
   };
 }

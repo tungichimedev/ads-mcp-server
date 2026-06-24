@@ -30,6 +30,14 @@ const SafetyConfigSchema = z.object({
 
 const AccountMetaSchema = z.object({
   account_id: z.string(),
+  // TikTok identifies ad accounts by `advertiser_id`. Optional here; when
+  // omitted the TikTok adapter falls back to `account_id`.
+  advertiser_id: z.string().optional(),
+  // Google Ads identifies accounts by `customer_id`, with `login_customer_id`
+  // being the manager (MCC) account. Both optional; the Google adapter falls
+  // back to `account_id` for the customer id.
+  customer_id: z.string().optional(),
+  login_customer_id: z.string().optional(),
   currency: z.string().length(3).optional(),
   label: z.string().optional(),
 });
@@ -113,8 +121,11 @@ async function loadConfigFromSecret(): Promise<AdsConfig> {
     const mod = await import('@google-cloud/secret-manager' as string);
     const { SecretManagerServiceClient } = mod;
     const client = new SecretManagerServiceClient();
+    // Use the resolved project id (from the metadata server on Cloud Run); the
+    // `projects/-` wildcard fails with PERMISSION_DENIED (no quota project).
+    const projectId = await client.getProjectId();
     const [version] = await client.accessSecretVersion({
-      name: 'projects/-/secrets/ads-mcp-config/versions/latest',
+      name: `projects/${projectId}/secrets/ads-mcp-config/versions/latest`,
     });
     const payload = version.payload?.data;
     if (!payload) {

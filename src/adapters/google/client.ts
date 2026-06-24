@@ -6,6 +6,8 @@ import type { UnifiedAd } from '../../models/ad.js';
 import type { DateRange, AttributionWindow, Status } from '../../models/platform.js';
 import { AdsError } from '../../utils/errors.js';
 import type { UnifiedKeyword, UnifiedSearchTerm, KeywordMutationResult } from '../../models/keyword.js';
+import type { AdPolicy, AssetPolicy, PolicyIssue } from '../../models/policy.js';
+import { buildPolicySummary, isApproved } from '../../models/policy.js';
 import {
   toGoogleCampaignType,
   fromGoogleCampaign,
@@ -306,7 +308,6 @@ export class GoogleAdapter implements BaseAdapter {
   ): Promise<PaginatedResponse<UnifiedCampaign>> {
     let gaql = `
       SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
-             campaign.start_date, campaign.end_date,
              campaign_budget.amount_micros, campaign_budget.period
       FROM campaign
       WHERE campaign.status != 'REMOVED'
@@ -341,7 +342,6 @@ export class GoogleAdapter implements BaseAdapter {
   async getCampaign(ctx: AdapterContext, campaignId: string): Promise<UnifiedCampaign> {
     const gaql = `
       SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,
-             campaign.start_date, campaign.end_date,
              campaign_budget.amount_micros, campaign_budget.period
       FROM campaign
       WHERE campaign.id = ${safeId(campaignId)}
@@ -497,7 +497,7 @@ export class GoogleAdapter implements BaseAdapter {
       SELECT ad_group.id, ad_group.name, ad_group.status, ad_group.campaign,
              ad_group.type, ad_group.cpc_bid_micros, ad_group.target_cpa_micros
       FROM ad_group
-      WHERE ad_group.campaign.id = ${safeId(campaignId)}
+      WHERE campaign.id = ${safeId(campaignId)}
         AND ad_group.status != 'REMOVED'
       LIMIT ${limit}
     `;
@@ -1354,6 +1354,115 @@ export class GoogleAdapter implements BaseAdapter {
         url_custom_parameters: ad.url_custom_parameters ?? [],
       };
     });
+  }
+
+  // ─── Policy / Ad Review ─────────────────────────────────────────────────────
+
+  async getAdPolicy(ctx: AdapterContext, adId: string): Promise<AdPolicy> {
+    const gaql = `
+      SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status,
+             ad_group_ad.policy_summary.approval_status,
+             ad_group_ad.policy_summary.review_status,
+             ad_group_ad.policy_summary.policy_topic_entries,
+             ad_group.id, ad_group.name, campaign.id, campaign.name
+      FROM ad_group_ad
+      WHERE ad_group_ad.ad.id = ${safeId(adId)}
+      LIMIT 1
+    `;
+    const rows = await this.query(ctx, gaql);
+    if (!rows.length) {
+      throw new AdsError('NOT_FOUND', 'google', `Ad ${adId} not found`, false);
+    }
+    return this.mapAdPolicy(rows[0]);
+  }
+
+  async getPolicyIssues(
+    ctx: AdapterContext,
+    scope: { campaignId?: string; adGroupId?: string },
+    options: { includeAssets: boolean; includeApproved: boolean; limit: number }
+  ): Promise<PolicyIssue[]> {
+    const limit = options.limit > 0 ? options.limit : 200;
+    const where: string[] = [`ad_group_ad.status != 'REMOVED'`];
+    if (scope.adGroupId) where.push(`ad_group.id = ${safeId(scope.adGroupId)}`);
+    if (scope.campaignId) where.push(`campaign.id = ${safeId(scope.campaignId)}`);
+
+    // ── Ad-level policy ──────────────────────────────────────────────────────
+    const adGaql = `
+      SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status,
+             ad_group_ad.policy_summary.approval_status,
+             ad_group_ad.policy_summary.review_status,
+             ad_group_ad.policy_summary.policy_topic_entries,
+             ad_group.id, ad_group.name, campaign.id, campaign.name
+      FROM ad_group_ad
+      WHERE ${where.join(' AND ')}
+      LIMIT ${limit}
+    `;
+    const adRows = await this.query(ctx, adGaql);
+    const issues: PolicyIssue[] = adRows
+      .map((r) => this.mapAdPolicy(r))
+      .filter((p) => options.includeApproved || !isApproved(p.approval_status));
+
+    // ── Asset-level policy (App campaigns, asset-based ads) ──────────────────
+    if (options.includeAssets) {
+      const assetWhere: string[] = [];
+      if (scope.adGroupId) assetWhere.push(`ad_group.id = ${safeId(scope.adGroupId)}`);
+      if (scope.campaignId) assetWhere.push(`campaign.id = ${safeId(scope.campaignId)}`);
+      const assetGaql = `
+        SELECT asset.id, asset.name, asset.type,
+               ad_group_ad_asset_view.field_type,
+               ad_group_ad_asset_view.policy_summary.approval_status,
+               ad_group_ad_asset_view.policy_summary.review_status,
+               ad_group_ad_asset_view.policy_summary.policy_topic_entries,
+               ad_group.id, ad_group.name, campaign.id, campaign.name
+        FROM ad_group_ad_asset_view
+        ${assetWhere.length ? `WHERE ${assetWhere.join(' AND ')}` : ''}
+        LIMIT ${limit}
+      `;
+      // Asset-level policy is best-effort: some accounts/queries may not support
+      // the view — never let it sink the whole call.
+      const assetRows = await this.query(ctx, assetGaql).catch(() => []);
+      for (const r of assetRows) {
+        const mapped = this.mapAssetPolicy(r);
+        if (options.includeApproved || !isApproved(mapped.approval_status)) {
+          issues.push(mapped);
+        }
+      }
+    }
+
+    return issues;
+  }
+
+  private mapAdPolicy(row: any): AdPolicy {
+    const aga = row?.ad_group_ad ?? {};
+    const summary = buildPolicySummary(aga.policy_summary);
+    return {
+      level: 'ad',
+      platform: 'google',
+      ad_id: String(aga.ad?.id ?? ''),
+      ad_group_id: String(row?.ad_group?.id ?? ''),
+      ad_group_name: String(row?.ad_group?.name ?? ''),
+      campaign_id: String(row?.campaign?.id ?? ''),
+      campaign_name: String(row?.campaign?.name ?? ''),
+      ...summary,
+    };
+  }
+
+  private mapAssetPolicy(row: any): AssetPolicy {
+    const view = row?.ad_group_ad_asset_view ?? {};
+    const asset = row?.asset ?? {};
+    const summary = buildPolicySummary(view.policy_summary);
+    return {
+      level: 'asset',
+      platform: 'google',
+      asset_id: String(asset.id ?? ''),
+      asset_type: String(asset.type ?? ''),
+      field_type: String(view.field_type ?? ''),
+      ad_group_id: String(row?.ad_group?.id ?? ''),
+      ad_group_name: String(row?.ad_group?.name ?? ''),
+      campaign_id: String(row?.campaign?.id ?? ''),
+      campaign_name: String(row?.campaign?.name ?? ''),
+      ...summary,
+    };
   }
 
   // ─── Account ──────────────────────────────────────────────────────────────
